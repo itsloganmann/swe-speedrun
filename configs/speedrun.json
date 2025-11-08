@@ -1,0 +1,34 @@
+{
+  "dataset": {
+    "source_dataset": "anchen-li/swe-bench-lite",
+    "local_cache": "data/processed/swe-speedrun.jsonl",
+    "train_split": 0.9,
+    "max_examples": 500
+  },
+  "training": {
+    "model_name": "Qwen/Qwen2.5-3B-Instruct",
+    "output_dir": "artifacts/checkpoints/qwen-speedrun",
+    "learning_rate": 0.0002,
+    "num_train_epochs": 2,
+    "per_device_train_batch_size": 2,
+    "gradient_accumulation_steps": 8,
+    "warmup_ratio": 0.04,
+    "weight_decay": 0.0,
+    "logging_steps": 10,
+    "eval_steps": 50,
+    "save_steps": 100,
+    "fp16": true,
+    "seed": 42,
+    "lora": {
+      "r": 8,
+      "alpha": 16,
+      "dropout": 0.05,
+      "target_modules": [
+        "q_proj",
+        "k_proj",
+        "v_proj",
+        "o_proj"
+      ]
+    }
+  }
+}

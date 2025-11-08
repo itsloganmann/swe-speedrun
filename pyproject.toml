@@ -1,0 +1,19 @@
+[project]
+name = "swe-speedrun-scaffold"
+version = "0.1.0"
+description = "SWE-agent scaffold and Qwen LoRA fine-tuning helpers"
+authors = [{ name = "Logan" }]
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+  "datasets>=2.17.0",
+  "transformers>=4.38.0",
+  "peft>=0.10.0",
+  "torch>=2.2.0",
+  "accelerate>=0.27.0",
+  "numpy>=1.24",
+]
+
+[tool.setuptools.packages.find]
+where = ["."]
+exclude = ["tests"]

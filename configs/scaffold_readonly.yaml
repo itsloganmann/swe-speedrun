@@ -1,0 +1,71 @@
+# SWE-Agent configuration for read-only scaffold walkthroughs.
+# The agent can inspect and reason about files but is prevented from performing write actions.
+
+run:
+  session_name: "swe-speedrun-readonly"
+  log_dir: "runs/${now:%Y%m%d_%H%M%S}"
+  max_steps: 120
+  model:
+    provider: "openai"
+    name: "gpt-4o-mini"
+    temperature: 0.2
+    top_p: 0.95
+
+workspace:
+  root: "."
+  allow_edits: false
+  tracked_extensions:
+    - ".py"
+    - ".md"
+    - ".yaml"
+    - ".json"
+  ignored_paths:
+    - "data/raw"
+    - "artifacts"
+
+telemetry:
+  enable: true
+  redact_tool_payloads: true
+  redact_user_messages: false
+
+memory:
+  type: "sqlite"
+  path: "artifacts/memory.db"
+
+# Tool configuration keeps the agent limited to read/analysis-only helpers.
+tools:
+  read_file:
+    enabled: true
+  list_dir:
+    enabled: true
+  grep_search:
+    enabled: true
+  run_tests:
+    enabled: false
+  apply_patch:
+    enabled: false
+  run_in_terminal:
+    enabled: false
+  create_file:
+    enabled: false
+
+prompts:
+  system: |
+    You are running in read-only audit mode. Do not attempt to edit files.
+    Focus on chain-of-thought transparency and documenting reproduction steps.
+  user_welcome: |
+    Confirm that you understand this is a read-only walkthrough session.
+    Outline a brief plan before taking actions.
+
+reporting:
+  summary_template: |
+    ## Session Summary
+    - ✅ Completed tasks: {completed_tasks}
+    - 📁 Files inspected: {files_inspected}
+    - ⏱️ Duration: {duration}
+    - 🧠 Key insights:
+      {insights}
+
+logging:
+  level: "INFO"
+  colorize: true
