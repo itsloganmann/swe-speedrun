@@ -58,15 +58,6 @@ python training/evaluate_qwen_speedrun.py artifacts/checkpoints/qwen-speedrun da
 ## Configuration
 
 Edit `configs/scaffold_readonly.yaml` to tweak SWE-agent behaviour. Training hyperparameters live in `swe_scaffold/config.py` and can be overridden through JSON passed to `train_qwen_speedrun.py`.
-
-## Git Workflow
-
-```bash
-git init
-git add .
-git commit -m "Initial commit: SWE speedrun scaffold"
-# git remote add origin <your-remote-url>
-# git push -u origin main
 ```
 
 ## License
