@@ -14,7 +14,7 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Build the SWE speedrun dataset cache.")
     parser.add_argument("--config", type=Path, default=Path("configs/scaffold_readonly.yaml"), help="Path to config file (YAML or JSON)")
     parser.add_argument("--output", type=Path, default=Path("data/processed/swe-speedrun.jsonl"), help="Destination JSONL path")
-    parser.add_argument("--dataset", type=str, default="anchen-li/swe-bench-lite", help="Hugging Face dataset identifier")
+    parser.add_argument("--dataset", type=str, default="SWE-bench/SWE-bench_Lite", help="Hugging Face dataset identifier")
     parser.add_argument("--limit", type=int, default=500, help="Optional limit on number of examples")
     return parser.parse_args()
 
