@@ -1,5 +1,5 @@
+artifacts
 configs
-data
 scripts
 swe_scaffold
 training

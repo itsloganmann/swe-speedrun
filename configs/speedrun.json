@@ -15,7 +15,7 @@
     "warmup_ratio": 0.04,
     "weight_decay": 0.0,
     "logging_steps": 10,
-    "evaluation_strategy": "steps",
+    "eval_strategy": "steps",
     "eval_steps": 50,
     "save_strategy": "steps",
     "save_steps": 100,

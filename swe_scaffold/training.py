@@ -97,7 +97,7 @@ def train_lora_model(split: DatasetSplit, training_config: TrainingConfig) -> Tu
         pad_to_multiple_of=8,
     )
 
-    evaluation_strategy = getattr(training_config, "evaluation_strategy", "no")  # "no" | "steps" | "epoch"
+    eval_strategy = getattr(training_config, "eval_strategy", "no")  # "no" | "steps" | "epoch"
     save_strategy = getattr(training_config, "save_strategy", "steps")           # "steps" | "epoch"
 
     training_args = TrainingArguments(
@@ -109,7 +109,7 @@ def train_lora_model(split: DatasetSplit, training_config: TrainingConfig) -> Tu
         max_grad_norm=training_config.max_grad_norm,
         warmup_ratio=training_config.warmup_ratio,
         logging_steps=training_config.logging_steps,
-        evaluation_strategy=evaluation_strategy,
+        eval_strategy=eval_strategy,
         eval_steps=training_config.eval_steps,
         save_strategy=save_strategy,
         save_steps=training_config.save_steps,

@@ -38,7 +38,7 @@ class TrainingConfig:
     weight_decay: float = 0.0
     lr_scheduler_type: str = "cosine"
     logging_steps: int = 10
-    evaluation_strategy: str = "steps"
+    eval_strategy: str = "steps"
     eval_steps: int = 50
     save_strategy: str = "steps"
     save_steps: int = 100
