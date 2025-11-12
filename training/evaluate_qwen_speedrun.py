@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 from pathlib import Path
 
 from datasets import Dataset
@@ -26,6 +27,9 @@ def load_dataset(path: Path) -> Dataset:
 
 
 def main() -> None:
+    # Suppress TensorFlow warnings if TF is installed
+    os.environ.setdefault("TF_CPP_MIN_LOG_LEVEL", "3")
+    
     args = parse_args()
     dataset = load_dataset(args.dataset)
     perplexity, label_counts = evaluate_model(str(args.model), dataset)

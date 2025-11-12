@@ -38,7 +38,7 @@ class TrainingConfig:
     weight_decay: float = 0.0
     lr_scheduler_type: str = "cosine"
     logging_steps: int = 10
-    evaluation_strategy: str = "steps"
+    eval_strategy: str = "steps"
     eval_steps: int = 50
     save_strategy: str = "steps"
     save_steps: int = 100
@@ -54,7 +54,7 @@ class DatasetConfig:
 
     source_dataset: str = "anchen-li/swe-bench-lite"
     local_cache: Path = Path("data/processed/swe-speedrun.jsonl")
-    train_split: float = 0.9
+    dev_split: float = 0.9
     text_fields: List[str] = field(
         default_factory=lambda: [
             "problem_statement",

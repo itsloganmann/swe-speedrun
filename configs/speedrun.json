@@ -2,7 +2,7 @@
   "dataset": {
     "source_dataset": "anchen-li/swe-bench-lite",
     "local_cache": "data/processed/swe-speedrun.jsonl",
-    "train_split": 0.9,
+    "dev_split": 0.9,
     "max_examples": 500
   },
   "training": {
@@ -15,7 +15,9 @@
     "warmup_ratio": 0.04,
     "weight_decay": 0.0,
     "logging_steps": 10,
+    "eval_strategy": "steps",
     "eval_steps": 50,
+    "save_strategy": "steps",
     "save_steps": 100,
     "fp16": true,
     "seed": 42,
