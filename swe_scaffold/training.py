@@ -1,8 +1,8 @@
 """Training utilities for LoRA fine-tuning of Qwen speedrun models."""
 from __future__ import annotations
 
-from functools import partial
-from typing import Dict, Iterable, Tuple
+import torch
+from typing import Dict, Tuple
 
 from datasets import Dataset
 from peft import LoraConfig as PeftLoraConfig
@@ -11,7 +11,6 @@ from transformers import (
     AutoModelForCausalLM,
     AutoTokenizer,
     DataCollatorForLanguageModeling,
-    IntervalStrategy,
     Trainer,
     TrainingArguments,
 )
@@ -35,7 +34,6 @@ You are a meticulous SWE agent who analyses repositories and proposes minimal, h
 
 def load_tokenizer_and_model(model_name: str):
     """Load base model and tokenizer with sensible defaults for instruction fine-tuning."""
-
     tokenizer = AutoTokenizer.from_pretrained(model_name, use_fast=True)
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
@@ -54,11 +52,17 @@ def _format_records(dataset: Dataset) -> Dataset:
     return dataset.map(lambda example: {"text": PROMPT_TEMPLATE.format(**example)})
 
 
-def _tokenize_records(tokenizer, dataset: Dataset) -> Dataset:
+def _tokenize_records(tokenizer, dataset: Dataset, max_len: int = 2048) -> Dataset:
+    # Hard padding ensures uniform sequence lengths for input_ids and labels
     def _tokenize(example: Dict[str, str]):
-        tokens = tokenizer(example["text"], truncation=True, max_length=2048)
-        tokens["labels"] = tokens["input_ids"].copy()
-        return tokens
+        enc = tokenizer(
+            example["text"],
+            truncation=True,
+            padding="max_length",
+            max_length=max_len,
+        )
+        enc["labels"] = enc["input_ids"].copy()
+        return enc
 
     return dataset.map(_tokenize, remove_columns=dataset.column_names)
 
@@ -77,14 +81,24 @@ def _apply_lora(model, config: LoRAConfig):
 
 
 def train_lora_model(split: DatasetSplit, training_config: TrainingConfig) -> Tuple[Trainer, object]:
-    """Fine-tune the base model with LoRA on the provided dataset split."""
+    """Fine-tune the base model with LoRA on the provided dataset split (dev/test)."""
 
     tokenizer, base_model = load_tokenizer_and_model(training_config.model_name)
-    tokenized_train = _tokenize_records(tokenizer, _format_records(split.train))
-    tokenized_eval = _tokenize_records(tokenizer, _format_records(split.validation))
+
+    # Use dev for training and test for evaluation
+    tokenized_train = _tokenize_records(tokenizer, _format_records(split.dev), max_len=2048)
+    tokenized_eval = _tokenize_records(tokenizer, _format_records(split.test), max_len=2048)
 
     lora_model = _apply_lora(base_model, training_config.lora)
-    data_collator = DataCollatorForLanguageModeling(tokenizer=tokenizer, mlm=False)
+
+    data_collator = DataCollatorForLanguageModeling(
+        tokenizer=tokenizer,
+        mlm=False,
+        pad_to_multiple_of=8,
+    )
+
+    evaluation_strategy = getattr(training_config, "evaluation_strategy", "no")  # "no" | "steps" | "epoch"
+    save_strategy = getattr(training_config, "save_strategy", "steps")           # "steps" | "epoch"
 
     training_args = TrainingArguments(
         output_dir=str(training_config.output_dir),
@@ -95,14 +109,14 @@ def train_lora_model(split: DatasetSplit, training_config: TrainingConfig) -> Tu
         max_grad_norm=training_config.max_grad_norm,
         warmup_ratio=training_config.warmup_ratio,
         logging_steps=training_config.logging_steps,
-        eval_strategy=IntervalStrategy(training_config.evaluation_strategy),
         eval_steps=training_config.eval_steps,
-        save_strategy=IntervalStrategy(training_config.save_strategy),
+        save_strategy=save_strategy,
         save_steps=training_config.save_steps,
         fp16=training_config.fp16,
         lr_scheduler_type=training_config.lr_scheduler_type,
         seed=training_config.seed,
         report_to=["tensorboard"],
+        dataloader_pin_memory=torch.cuda.is_available(),
     )
 
     trainer = Trainer(

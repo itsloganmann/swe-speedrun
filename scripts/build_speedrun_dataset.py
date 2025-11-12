@@ -7,33 +7,44 @@ import json
 from pathlib import Path
 
 from swe_scaffold.config import SpeedrunConfig
-from swe_scaffold.dataset import SpeedrunDatasetBuilder, load_conversation_dataset
+from swe_scaffold.dataset import load_conversation_dataset
 
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Build the SWE speedrun dataset cache.")
     parser.add_argument("--config", type=Path, default=Path("configs/scaffold_readonly.yaml"), help="Path to config file (YAML or JSON)")
-    parser.add_argument("--output", type=Path, default=Path("data/processed/swe-speedrun.jsonl"), help="Destination JSONL path")
+    parser.add_argument("--output", type=Path, default=Path("data/processed/swe-speedrun.jsonl"), help="Destination JSONL path (dev split)")
     parser.add_argument("--dataset", type=str, default="SWE-bench/SWE-bench_Lite", help="Hugging Face dataset identifier")
-    parser.add_argument("--limit", type=int, default=500, help="Optional limit on number of examples")
+    parser.add_argument("--limit", type=int, default=500, help="Optional limit on number of dev examples")
+    parser.add_argument("--emit-test", action="store_true", help="Also write a .test.jsonl next to output")
     return parser.parse_args()
+
+
+def _dump_jsonl(ds, path: Path) -> int:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    count = 0
+    with path.open("w", encoding="utf-8") as handle:
+        for prompt, response, label in zip(ds["prompt"], ds["response"], ds["label"]):
+            handle.write(json.dumps({"prompt": prompt, "response": response, "label": label}, ensure_ascii=False) + "\n")
+            count += 1
+    return count
 
 
 def main() -> None:
     args = parse_args()
-    config = SpeedrunConfig()
+    # Loaded but not used directly here; kept for parity with scaffold flow
+    _ = SpeedrunConfig()
+
     split = load_conversation_dataset(args.dataset, limit=args.limit)
 
-    records = []
-    for prompt, response, label in zip(split.train["prompt"], split.train["response"], split.train["label"]):
-        records.append({"prompt": prompt, "response": response, "label": label})
+    # Write dev split to the requested output
+    n_dev = _dump_jsonl(split.dev, args.output)
+    print(f"Wrote {n_dev} dev examples to {args.output}")
 
-    args.output.parent.mkdir(parents=True, exist_ok=True)
-    with args.output.open("w", encoding="utf-8") as handle:
-        for record in records:
-            handle.write(json.dumps(record, ensure_ascii=False) + "\n")
-
-    print(f"Wrote {len(records)} training examples to {args.output}")
+    if args.emit_test:
+        test_path = args.output.with_name(args.output.stem + ".test.jsonl")
+        n_test = _dump_jsonl(split.test, test_path)
+        print(f"Wrote {n_test} test examples to {test_path}")
 
 
 if __name__ == "__main__":
