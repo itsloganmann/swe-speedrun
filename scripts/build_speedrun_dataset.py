@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 from pathlib import Path
 
 from swe_scaffold.config import SpeedrunConfig
@@ -31,6 +32,9 @@ def _dump_jsonl(ds, path: Path) -> int:
 
 
 def main() -> None:
+    # Suppress TensorFlow warnings if TF is installed
+    os.environ.setdefault("TF_CPP_MIN_LOG_LEVEL", "3")
+    
     args = parse_args()
     # Loaded but not used directly here; kept for parity with scaffold flow
     _ = SpeedrunConfig()

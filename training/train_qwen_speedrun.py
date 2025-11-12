@@ -4,9 +4,8 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 from pathlib import Path
-
-from datasets import Dataset, DatasetDict
 
 from swe_scaffold.config import SpeedrunConfig
 from swe_scaffold.dataset import SpeedrunDatasetBuilder
@@ -20,19 +19,10 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def load_split(path: Path) -> DatasetDict:
-    records = [json.loads(line) for line in path.read_text().splitlines() if line.strip()]
-    dataset = Dataset.from_dict(records)
-    split_point = int(len(dataset) * 0.9)
-    return DatasetDict(
-        {
-            "train": dataset.select(range(split_point)),
-            "validation": dataset.select(range(split_point, len(dataset))),
-        }
-    )
-
-
 def main() -> None:
+    # Suppress TensorFlow warnings if TF is installed
+    os.environ.setdefault("TF_CPP_MIN_LOG_LEVEL", "3")
+    
     args = parse_args()
     config = SpeedrunConfig.from_dict(json.loads(args.config.read_text()))
     builder = SpeedrunDatasetBuilder(config.dataset.local_cache)

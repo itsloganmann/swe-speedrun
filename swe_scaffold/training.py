@@ -109,6 +109,7 @@ def train_lora_model(split: DatasetSplit, training_config: TrainingConfig) -> Tu
         max_grad_norm=training_config.max_grad_norm,
         warmup_ratio=training_config.warmup_ratio,
         logging_steps=training_config.logging_steps,
+        evaluation_strategy=evaluation_strategy,
         eval_steps=training_config.eval_steps,
         save_strategy=save_strategy,
         save_steps=training_config.save_steps,

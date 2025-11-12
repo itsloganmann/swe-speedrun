@@ -54,7 +54,7 @@ class DatasetConfig:
 
     source_dataset: str = "anchen-li/swe-bench-lite"
     local_cache: Path = Path("data/processed/swe-speedrun.jsonl")
-    train_split: float = 0.9
+    dev_split: float = 0.9
     text_fields: List[str] = field(
         default_factory=lambda: [
             "problem_statement",
