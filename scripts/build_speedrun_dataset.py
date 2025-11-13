@@ -16,7 +16,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--config", type=Path, default=Path("configs/scaffold_readonly.yaml"), help="Path to config file (YAML or JSON)")
     parser.add_argument("--output", type=Path, default=Path("data/processed/swe-speedrun.jsonl"), help="Destination JSONL path (dev split)")
     parser.add_argument("--dataset", type=str, default="SWE-bench/SWE-bench", help="Hugging Face dataset identifier")
-    parser.add_argument("--limit", type=int, default=500, help="Optional limit on number of dev examples")
+    parser.add_argument("--limit", type=int, default=None, help="Optional limit on number of dev examples. Omit or use 0 or negative value to load full dataset.")
     parser.add_argument("--emit-test", action="store_true", help="Also write a .test.jsonl next to output")
     return parser.parse_args()
 

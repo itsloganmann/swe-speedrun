@@ -81,10 +81,13 @@ def load_conversation_dataset(dataset_name: str, split: float = 0.9, limit: Opti
         raise TypeError("Only map-style datasets are supported for speedrun training")
 
     # Optional limits
-    if limit is not None:
+    if limit is not None and limit > 0:
         dev_source = dev_source.select(range(min(limit, len(dev_source))))
         test_cap = max(limit // 10, 1)
         test_source = test_source.select(range(min(test_cap, len(test_source))))
+    else:
+        # Load full dataset - log the total count
+        print(f"Loading full dataset: {len(dev_source)} dev examples, {len(test_source)} test examples (total: {len(dev_source) + len(test_source)})")
 
     # Project fields to prompt/response/label
     def _project(src: Dataset) -> Dataset:
