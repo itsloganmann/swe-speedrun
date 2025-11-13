@@ -1,5 +1,0 @@
-artifacts
-configs
-scripts
-swe_scaffold
-training
