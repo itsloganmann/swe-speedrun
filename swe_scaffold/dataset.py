@@ -60,10 +60,38 @@ class SpeedrunDatasetBuilder:
         return split
 
 
-def load_conversation_dataset(dataset_name: str, split: float = 0.9, limit: Optional[int] = None) -> DatasetSplit:
-    """Load SWE-bench_Lite and project into prompt/response pairs using dev/test splits."""
+def load_conversation_dataset(
+    dataset_name: str,
+    train_only: bool = True,
+    holdout_fraction: Optional[float] = 0.1,
+    limit: Optional[int] = None,
+) -> DatasetSplit:
+    """Load SWE-bench and project into prompt/response pairs using dev/test splits.
+    
+    Parameters
+    ----------
+    dataset_name : str
+        Hugging Face dataset identifier (e.g., "SWE-bench/SWE-bench").
+    train_only : bool, default=True
+        If True, load only the train split from the dataset.
+    holdout_fraction : Optional[float], default=0.1
+        Fraction of data to hold out for test split. If None or 0, all data becomes dev and test is empty.
+        Must be between 0 and 1 if provided.
+    limit : Optional[int], default=None
+        Maximum number of examples to load. If None or <= 0, load all available data.
+    
+    Returns
+    -------
+    DatasetSplit
+        Split containing dev and test datasets with prompt/response/label fields.
+    """
 
-    dataset_any = load_dataset(dataset_name)
+    # Load dataset
+    if train_only:
+        dataset_any = load_dataset(dataset_name, split="train")
+    else:
+        dataset_any = load_dataset(dataset_name)
+    
     # Resolve to dev/test sources
     if isinstance(dataset_any, DatasetDict):
         if "dev" in dataset_any and "test" in dataset_any:
@@ -72,19 +100,34 @@ def load_conversation_dataset(dataset_name: str, split: float = 0.9, limit: Opti
         else:
             # Fallback: derive dev/test from a single split
             base_key = "train" if "train" in dataset_any else sorted(dataset_any.keys())[0]
-            derived = dataset_any[base_key].train_test_split(test_size=1 - split, seed=42)
-            dev_source, test_source = derived["train"], derived["test"]
+            if holdout_fraction is None or holdout_fraction <= 0:
+                dev_source = dataset_any[base_key]
+                test_source = None
+            else:
+                # Ensure valid holdout_fraction
+                if holdout_fraction >= 1.0:
+                    holdout_fraction = 0.1
+                derived = dataset_any[base_key].train_test_split(test_size=holdout_fraction, seed=42)
+                dev_source, test_source = derived["train"], derived["test"]
     elif isinstance(dataset_any, Dataset):
-        derived = dataset_any.train_test_split(test_size=1 - split, seed=42)
-        dev_source, test_source = derived["train"], derived["test"]
+        if holdout_fraction is None or holdout_fraction <= 0:
+            dev_source = dataset_any
+            test_source = None
+        else:
+            # Ensure valid holdout_fraction
+            if holdout_fraction >= 1.0:
+                holdout_fraction = 0.1
+            derived = dataset_any.train_test_split(test_size=holdout_fraction, seed=42)
+            dev_source, test_source = derived["train"], derived["test"]
     else:
         raise TypeError("Only map-style datasets are supported for speedrun training")
 
-    # Optional limits
-    if limit is not None:
+    # Optional limits - apply only if limit is not None and > 0
+    if limit is not None and limit > 0:
         dev_source = dev_source.select(range(min(limit, len(dev_source))))
-        test_cap = max(limit // 10, 1)
-        test_source = test_source.select(range(min(test_cap, len(test_source))))
+        if test_source is not None:
+            test_cap = max(limit // 10, 1)
+            test_source = test_source.select(range(min(test_cap, len(test_source))))
 
     # Project fields to prompt/response/label
     def _project(src: Dataset) -> Dataset:
@@ -94,9 +137,24 @@ def load_conversation_dataset(dataset_name: str, split: float = 0.9, limit: Opti
         for row in src:
             row_dict = dict(row)
             prompt = row_dict.get("problem_statement", "") or ""
-            response = row_dict.get("change_summary", "") or ""
-            resolved = row_dict.get("resolved", False)
-            label = SpeedrunLabel.SUCCESS if resolved else SpeedrunLabel.FAILURE
+            
+            # Response fallback order: change_summary → patch → test_patch → ""
+            response = (
+                row_dict.get("change_summary", "")
+                or row_dict.get("patch", "")
+                or row_dict.get("test_patch", "")
+                or ""
+            )
+            
+            # Labeling: if resolved present use it; else SUCCESS if non-empty patch else FAILURE
+            if "resolved" in row_dict:
+                resolved = row_dict["resolved"]
+                label = SpeedrunLabel.SUCCESS if resolved else SpeedrunLabel.FAILURE
+            else:
+                # Use patch presence as heuristic
+                has_patch = bool(row_dict.get("patch", ""))
+                label = SpeedrunLabel.SUCCESS if has_patch else SpeedrunLabel.FAILURE
+            
             prompts.append(prompt)
             responses.append(response)
             labels.append(label)
@@ -109,7 +167,12 @@ def load_conversation_dataset(dataset_name: str, split: float = 0.9, limit: Opti
         )
 
     dev_dataset = _project(dev_source)
-    test_dataset = _project(test_source)
+    
+    # Handle empty test split case
+    if test_source is None:
+        test_dataset = Dataset.from_dict({"prompt": [], "response": [], "label": []})
+    else:
+        test_dataset = _project(test_source)
 
     return DatasetSplit(dev=dev_dataset, test=test_dataset)
 

@@ -52,16 +52,17 @@ class TrainingConfig:
 class DatasetConfig:
     """Configuration for dataset assembly and caching."""
 
-    source_dataset: str = "anchen-li/swe-bench-lite"
+    source_dataset: str = "SWE-bench/SWE-bench"
     local_cache: Path = Path("data/processed/swe-speedrun.jsonl")
-    dev_split: float = 0.9
+    train_only: bool = True
+    holdout_fraction: Optional[float] = 0.1
     text_fields: List[str] = field(
         default_factory=lambda: [
             "problem_statement",
             "change_summary",
         ]
     )
-    max_examples: Optional[int] = 500
+    max_examples: Optional[int] = None
 
 
 @dataclass(slots=True)
@@ -75,7 +76,14 @@ class SpeedrunConfig:
     def from_dict(cls, payload: dict) -> "SpeedrunConfig":
         """Instantiate a configuration object from a nested dictionary."""
 
-        dataset = DatasetConfig(**payload.get("dataset", {}))
+        dataset_payload = payload.get("dataset", {})
+        # Backward compatibility: map legacy dev_split to holdout_fraction
+        if "dev_split" in dataset_payload and "holdout_fraction" not in dataset_payload:
+            dev_split = dataset_payload.pop("dev_split")
+            # dev_split was the fraction used for training, so holdout is 1 - dev_split
+            dataset_payload["holdout_fraction"] = 1.0 - dev_split
+        
+        dataset = DatasetConfig(**dataset_payload)
         training_payload = payload.get("training", {})
         lora_payload = training_payload.pop("lora", {})
         training = TrainingConfig(**training_payload, lora=LoRAConfig(**lora_payload))
