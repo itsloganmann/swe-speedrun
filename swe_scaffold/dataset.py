@@ -60,31 +60,73 @@ class SpeedrunDatasetBuilder:
         return split
 
 
-def load_conversation_dataset(dataset_name: str, split: float = 0.9, limit: Optional[int] = None) -> DatasetSplit:
-    """Load SWE-bench_Lite and project into prompt/response pairs using dev/test splits."""
+def load_conversation_dataset(
+    dataset_name: str,
+    split: float = 0.9,
+    limit: Optional[int] = None,
+    train_only: bool = True,
+    holdout_fraction: Optional[float] = None,
+) -> DatasetSplit:
+    """Load SWE-bench and project into prompt/response pairs using dev/test splits.
 
-    dataset_any = load_dataset(dataset_name)
-    # Resolve to dev/test sources
-    if isinstance(dataset_any, DatasetDict):
-        if "dev" in dataset_any and "test" in dataset_any:
-            dev_source = dataset_any["dev"]
-            test_source = dataset_any["test"]
-        else:
-            # Fallback: derive dev/test from a single split
-            base_key = "train" if "train" in dataset_any else sorted(dataset_any.keys())[0]
-            derived = dataset_any[base_key].train_test_split(test_size=1 - split, seed=42)
+    Parameters
+    ----------
+    dataset_name:
+        Hugging Face dataset identifier (e.g., "SWE-bench/SWE-bench").
+    split:
+        Fraction of data to use for training (dev) split. Default: 0.9.
+    limit:
+        Optional limit on number of examples to load from dev split.
+    train_only:
+        If True, load only the 'train' split from HF dataset. Default: True.
+    holdout_fraction:
+        Optional fraction for test split when train_only is True.
+        If None, uses (1 - split). If 0.0, no test split is created.
+    """
+
+    # Determine how to load the dataset
+    if train_only:
+        # Load only the train split
+        dataset_any = load_dataset(dataset_name, split="train")
+        if not isinstance(dataset_any, Dataset):
+            raise TypeError("Expected Dataset when using train_only mode")
+        
+        # Determine if we should create a holdout
+        if holdout_fraction is None:
+            holdout_fraction = 1 - split
+        
+        if holdout_fraction > 0:
+            derived = dataset_any.train_test_split(test_size=holdout_fraction, seed=42)
             dev_source, test_source = derived["train"], derived["test"]
-    elif isinstance(dataset_any, Dataset):
-        derived = dataset_any.train_test_split(test_size=1 - split, seed=42)
-        dev_source, test_source = derived["train"], derived["test"]
+        else:
+            # No holdout - all data goes to dev, empty test
+            dev_source = dataset_any
+            test_source = Dataset.from_dict({"prompt": [], "response": [], "label": []})
     else:
-        raise TypeError("Only map-style datasets are supported for speedrun training")
+        # Legacy behavior: try to load from existing splits
+        dataset_any = load_dataset(dataset_name)
+        # Resolve to dev/test sources
+        if isinstance(dataset_any, DatasetDict):
+            if "dev" in dataset_any and "test" in dataset_any:
+                dev_source = dataset_any["dev"]
+                test_source = dataset_any["test"]
+            else:
+                # Fallback: derive dev/test from a single split
+                base_key = "train" if "train" in dataset_any else sorted(dataset_any.keys())[0]
+                derived = dataset_any[base_key].train_test_split(test_size=1 - split, seed=42)
+                dev_source, test_source = derived["train"], derived["test"]
+        elif isinstance(dataset_any, Dataset):
+            derived = dataset_any.train_test_split(test_size=1 - split, seed=42)
+            dev_source, test_source = derived["train"], derived["test"]
+        else:
+            raise TypeError("Only map-style datasets are supported for speedrun training")
 
     # Optional limits
     if limit is not None:
         dev_source = dev_source.select(range(min(limit, len(dev_source))))
-        test_cap = max(limit // 10, 1)
-        test_source = test_source.select(range(min(test_cap, len(test_source))))
+        if holdout_fraction is None or holdout_fraction > 0:
+            test_cap = max(limit // 10, 1)
+            test_source = test_source.select(range(min(test_cap, len(test_source))))
 
     # Project fields to prompt/response/label
     def _project(src: Dataset) -> Dataset:
@@ -94,9 +136,24 @@ def load_conversation_dataset(dataset_name: str, split: float = 0.9, limit: Opti
         for row in src:
             row_dict = dict(row)
             prompt = row_dict.get("problem_statement", "") or ""
-            response = row_dict.get("change_summary", "") or ""
-            resolved = row_dict.get("resolved", False)
-            label = SpeedrunLabel.SUCCESS if resolved else SpeedrunLabel.FAILURE
+            
+            # Fallback response selection: change_summary → patch → test_patch → ""
+            response = (
+                row_dict.get("change_summary", "")
+                or row_dict.get("patch", "")
+                or row_dict.get("test_patch", "")
+                or ""
+            )
+            
+            # Label heuristic: If resolved field exists, use it; otherwise check patch
+            if "resolved" in row_dict:
+                resolved = row_dict.get("resolved", False)
+                label = SpeedrunLabel.SUCCESS if resolved else SpeedrunLabel.FAILURE
+            else:
+                # If non-empty patch exists, label as SUCCESS
+                patch = row_dict.get("patch", "")
+                label = SpeedrunLabel.SUCCESS if patch else SpeedrunLabel.FAILURE
+            
             prompts.append(prompt)
             responses.append(response)
             labels.append(label)
@@ -108,8 +165,8 @@ def load_conversation_dataset(dataset_name: str, split: float = 0.9, limit: Opti
             }
         )
 
-    dev_dataset = _project(dev_source)
-    test_dataset = _project(test_source)
+    dev_dataset = _project(dev_source) if len(dev_source) > 0 else dev_source
+    test_dataset = _project(test_source) if len(test_source) > 0 else test_source
 
     return DatasetSplit(dev=dev_dataset, test=test_dataset)
 

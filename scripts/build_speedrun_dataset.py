@@ -17,6 +17,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--output", type=Path, default=Path("data/processed/swe-speedrun.jsonl"), help="Destination JSONL path (dev split)")
     parser.add_argument("--dataset", type=str, default="SWE-bench/SWE-bench", help="Hugging Face dataset identifier")
     parser.add_argument("--limit", type=int, default=500, help="Optional limit on number of dev examples")
+    parser.add_argument("--train-only", action="store_true", default=True, help="Load only the train split from HF dataset (default: True)")
+    parser.add_argument("--no-train-only", dest="train_only", action="store_false", help="Disable train-only mode (load all splits)")
+    parser.add_argument("--no-holdout", action="store_true", help="Skip creating a test split (all data goes to dev)")
     parser.add_argument("--emit-test", action="store_true", help="Also write a .test.jsonl next to output")
     return parser.parse_args()
 
@@ -39,7 +42,15 @@ def main() -> None:
     # Loaded but not used directly here; kept for parity with scaffold flow
     _ = SpeedrunConfig()
 
-    split = load_conversation_dataset(args.dataset, limit=args.limit)
+    # Determine holdout_fraction based on flags
+    holdout_fraction = 0.0 if args.no_holdout else None
+
+    split = load_conversation_dataset(
+        args.dataset,
+        limit=args.limit,
+        train_only=args.train_only,
+        holdout_fraction=holdout_fraction,
+    )
 
     # Write dev split to the requested output
     n_dev = _dump_jsonl(split.dev, args.output)

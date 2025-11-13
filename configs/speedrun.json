@@ -1,8 +1,10 @@
 {
   "dataset": {
-    "source_dataset": "anchen-li/swe-bench-lite",
+    "source_dataset": "SWE-bench/SWE-bench",
     "local_cache": "data/processed/swe-speedrun.jsonl",
     "dev_split": 0.9,
+    "train_only": true,
+    "holdout_fraction": null,
     "max_examples": 500
   },
   "training": {
