@@ -15,6 +15,11 @@ swe_speedrun_scaffold.egg-info/requires.txt
 swe_speedrun_scaffold.egg-info/top_level.txt
 tests/test_build_integration.py
 tests/test_dataset_splits.py
+tests/test_include_empty.py
+tests/test_labeling_heuristic.py
+tests/test_patch_length_filter.py
+tests/test_skipped_report_accounting.py
+tests/test_train_only.py
 tests/test_training_config.py
 training/evaluate_qwen_speedrun.py
 training/train_qwen_speedrun.py

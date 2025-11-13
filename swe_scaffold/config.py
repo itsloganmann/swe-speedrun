@@ -52,16 +52,35 @@ class TrainingConfig:
 class DatasetConfig:
     """Configuration for dataset assembly and caching."""
 
-    source_dataset: str = "anchen-li/swe-bench-lite"
+    source_dataset: str = "SWE-bench/SWE-bench"
     local_cache: Path = Path("data/processed/swe-speedrun.jsonl")
-    dev_split: float = 0.9
+    holdout_fraction: Optional[float] = None
+    train_only: bool = True
+    include_empty: bool = False
+    min_patch_chars: Optional[int] = None
+    max_examples: Optional[int] = None
+    skipped_report_path: Optional[Path] = None
     text_fields: List[str] = field(
         default_factory=lambda: [
             "problem_statement",
             "change_summary",
         ]
     )
-    max_examples: Optional[int] = 500
+    
+    # Backward compatibility
+    @property
+    def dev_split(self) -> float:
+        """Legacy property for backward compatibility. Maps to (1 - holdout_fraction)."""
+        if self.holdout_fraction is None:
+            return 1.0 if self.train_only else 0.9
+        return 1.0 - self.holdout_fraction
+    
+    @dev_split.setter
+    def dev_split(self, value: float) -> None:
+        """Legacy setter for backward compatibility. Maps to holdout_fraction."""
+        self.holdout_fraction = 1.0 - value
+        if self.holdout_fraction == 0.0:
+            self.train_only = True
 
 
 @dataclass(slots=True)
