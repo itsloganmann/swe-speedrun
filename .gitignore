@@ -41,3 +41,4 @@ artifacts/
 # Logs
 *.log
 tensorboard/
+swe_speedrun_scaffold.egg-info/
