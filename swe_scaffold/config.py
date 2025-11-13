@@ -54,7 +54,8 @@ class DatasetConfig:
 
     source_dataset: str = "anchen-li/swe-bench-lite"
     local_cache: Path = Path("data/processed/swe-speedrun.jsonl")
-    dev_split: float = 0.9
+    holdout_fraction: Optional[float] = None
+    dev_split: Optional[float] = None  # Legacy parameter, use holdout_fraction instead
     text_fields: List[str] = field(
         default_factory=lambda: [
             "problem_statement",
