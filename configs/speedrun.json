@@ -2,7 +2,7 @@
   "dataset": {
     "source_dataset": "anchen-li/swe-bench-lite",
     "local_cache": "data/processed/swe-speedrun.jsonl",
-    "dev_split": 0.9,
+    "holdout_fraction": null,
     "max_examples": 500
   },
   "training": {

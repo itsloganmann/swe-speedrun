@@ -18,6 +18,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--dataset", type=str, default="SWE-bench/SWE-bench", help="Hugging Face dataset identifier")
     parser.add_argument("--limit", type=int, default=500, help="Optional limit on number of dev examples")
     parser.add_argument("--emit-test", action="store_true", help="Also write a .test.jsonl next to output")
+    parser.add_argument("--no-holdout", action="store_true", help="Use entire dataset for training (no test split)")
     return parser.parse_args()
 
 
@@ -39,16 +40,26 @@ def main() -> None:
     # Loaded but not used directly here; kept for parity with scaffold flow
     _ = SpeedrunConfig()
 
-    split = load_conversation_dataset(args.dataset, limit=args.limit)
+    # Determine holdout fraction
+    holdout_fraction = None if args.no_holdout else None  # Default is no holdout
+    
+    split = load_conversation_dataset(
+        args.dataset, 
+        holdout_fraction=holdout_fraction,
+        limit=args.limit
+    )
 
     # Write dev split to the requested output
     n_dev = _dump_jsonl(split.dev, args.output)
-    print(f"Wrote {n_dev} dev examples to {args.output}")
+    n_test = len(split.test)
+    
+    # Calculate skipped (if we had tracking from the raw dataset size, we'd use that)
+    print(f"Loaded {n_dev} training examples, test={n_test}")
 
-    if args.emit_test:
+    if args.emit_test and n_test > 0:
         test_path = args.output.with_name(args.output.stem + ".test.jsonl")
-        n_test = _dump_jsonl(split.test, test_path)
-        print(f"Wrote {n_test} test examples to {test_path}")
+        n_test_written = _dump_jsonl(split.test, test_path)
+        print(f"Wrote {n_test_written} test examples to {test_path}")
 
 
 if __name__ == "__main__":

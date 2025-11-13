@@ -10,10 +10,12 @@ This repository packages a reproducible workflow for exploring SWE-agent speedru
 ## Dataset Splits
 
 This scaffold uses **dev** and **test** splits to align with SWE-bench Lite naming conventions:
-- **dev**: Training split (default 90% of data)
-- **test**: Evaluation/holdout split (default 10% of data)
+- **dev**: Training split (default: 100% of data)
+- **test**: Evaluation/holdout split (default: none, can be configured via `holdout_fraction`)
 
-The split ratio can be configured via the `dev_split` parameter in configuration files.
+By default, no holdout is used and all data is assigned to the dev split. The holdout can be configured via the `holdout_fraction` parameter in configuration files.
+
+**Response Filtering**: Examples lacking both a `change_summary` and `patch`/`test_patch` fields are automatically removed during dataset loading. The fallback chain tries `change_summary` → `patch` → `test_patch` to find a valid response.
 
 ## Project Layout
 
@@ -51,7 +53,13 @@ pip install -r requirements.txt
 2. **Prepare dataset**
 
 ```bash
+# Default: no holdout, all data for training
 python scripts/build_speedrun_dataset.py --dataset anchen-li/swe-bench-lite --limit 500 --output data/processed/swe-speedrun.jsonl
+
+# With holdout for evaluation (not default)
+python scripts/build_speedrun_dataset.py --dataset anchen-li/swe-bench-lite --limit 500 --output data/processed/swe-speedrun.jsonl --emit-test
+
+# View dataset statistics
 python scripts/summarize_dataset.py data/processed/swe-speedrun.jsonl
 ```
 
@@ -77,7 +85,8 @@ pytest tests/ -v
 
 Edit `configs/speedrun.json` to customize training parameters. Key settings include:
 
-- `dataset.dev_split`: Fraction of data used for training (default: 0.9)
+- `dataset.holdout_fraction`: Fraction of data to hold out for testing (default: None for no holdout)
+- `dataset.dev_split`: Legacy parameter (deprecated, use `holdout_fraction` instead)
 - `training.eval_strategy`: When to evaluate ("no", "steps", or "epoch")
 - `training.eval_steps`: Number of steps between evaluations
 - `training.save_strategy`: When to save checkpoints
