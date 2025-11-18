@@ -25,12 +25,27 @@ def parse_args() -> argparse.Namespace:
 
 
 def _dump_jsonl(ds, path: Path) -> int:
+    """Write a dataset to JSONL with ensure_ascii to escape all special characters."""
     path.parent.mkdir(parents=True, exist_ok=True)
     count = 0
     with path.open("w", encoding="utf-8") as handle:
         for prompt, response, label in zip(ds["prompt"], ds["response"], ds["label"]):
-            handle.write(json.dumps({"prompt": prompt, "response": response, "label": label}, ensure_ascii=False) + "\n")
-            count += 1
+            record = {
+                "prompt": str(prompt),
+                "response": str(response),
+                "label": label
+            }
+            
+            # Use ensure_ascii=True to escape all problematic characters
+            try:
+                line = json.dumps(record, ensure_ascii=True)
+                handle.write(line + "\n")
+                handle.flush()  # Force immediate write to prevent buffer issues
+                count += 1
+            except (TypeError, ValueError, UnicodeEncodeError) as e:
+                print(f"Warning: Failed to serialize record {count + 1}: {e}")
+                continue
+    
     return count
 
 
