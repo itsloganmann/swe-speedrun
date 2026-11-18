@@ -16,18 +16,36 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--config", type=Path, default=Path("configs/scaffold_readonly.yaml"), help="Path to config file (YAML or JSON)")
     parser.add_argument("--output", type=Path, default=Path("data/processed/swe-speedrun.jsonl"), help="Destination JSONL path (dev split)")
     parser.add_argument("--dataset", type=str, default="SWE-bench/SWE-bench", help="Hugging Face dataset identifier")
-    parser.add_argument("--limit", type=int, default=None, help="Optional limit on number of dev examples. Omit or use 0 or negative value to load full dataset.")
+    parser.add_argument("--limit", type=int, default=None, help="Optional limit on dev examples. Omit or use 0 or a negative value to load all examples.")
+    parser.add_argument("--train-only", action="store_true", default=True, help="Load only the train split from HF dataset (default: True)")
+    parser.add_argument("--no-train-only", dest="train_only", action="store_false", help="Disable train-only mode (load all splits)")
+    parser.add_argument("--no-holdout", action="store_true", help="Skip creating a test split (all data goes to dev)")
     parser.add_argument("--emit-test", action="store_true", help="Also write a .test.jsonl next to output")
     return parser.parse_args()
 
 
 def _dump_jsonl(ds, path: Path) -> int:
+    """Write a dataset to JSONL with ensure_ascii to escape all special characters."""
     path.parent.mkdir(parents=True, exist_ok=True)
     count = 0
     with path.open("w", encoding="utf-8") as handle:
         for prompt, response, label in zip(ds["prompt"], ds["response"], ds["label"]):
-            handle.write(json.dumps({"prompt": prompt, "response": response, "label": label}, ensure_ascii=False) + "\n")
-            count += 1
+            record = {
+                "prompt": str(prompt),
+                "response": str(response),
+                "label": label
+            }
+            
+            # Use ensure_ascii=True to escape all problematic characters
+            try:
+                line = json.dumps(record, ensure_ascii=True)
+                handle.write(line + "\n")
+                handle.flush()  # Force immediate write to prevent buffer issues
+                count += 1
+            except (TypeError, ValueError, UnicodeEncodeError) as e:
+                print(f"Warning: Failed to serialize record {count + 1}: {e}")
+                continue
+    
     return count
 
 
@@ -39,7 +57,15 @@ def main() -> None:
     # Loaded but not used directly here; kept for parity with scaffold flow
     _ = SpeedrunConfig()
 
-    split = load_conversation_dataset(args.dataset, limit=args.limit)
+    # Determine holdout_fraction based on flags
+    holdout_fraction = 0.0 if args.no_holdout else None
+
+    split = load_conversation_dataset(
+        args.dataset,
+        limit=args.limit,
+        train_only=args.train_only,
+        holdout_fraction=holdout_fraction,
+    )
 
     # Write dev split to the requested output
     n_dev = _dump_jsonl(split.dev, args.output)

@@ -1,12 +1,15 @@
 """Integration test for build script with mock data."""
 import json
 import tempfile
+import sys
 from pathlib import Path
-from unittest.mock import Mock, patch
+from unittest.mock import patch
 
 import pytest
-from datasets import Dataset, DatasetDict
+from datasets import Dataset
 
+from scripts import build_speedrun_dataset
+from swe_scaffold.config import DatasetConfig, SpeedrunConfig
 from swe_scaffold.dataset import load_conversation_dataset, DatasetSplit
 
 
@@ -48,98 +51,56 @@ def test_build_script_jsonl_format():
         assert "label" in split.dev.column_names
 
 
-def test_load_conversation_dataset_with_no_limit():
-    """Test that when limit is None, the full dataset is loaded without truncation."""
-    # Create a mock dataset with a known size
-    mock_train_data = []
-    for i in range(100):
-        mock_train_data.append({
-            "problem_statement": f"Problem {i}",
-            "change_summary": f"Solution {i}",
-            "resolved": i % 2 == 0
-        })
-    
-    mock_train_dataset = Dataset.from_dict({
-        "problem_statement": [d["problem_statement"] for d in mock_train_data],
-        "change_summary": [d["change_summary"] for d in mock_train_data],
-        "resolved": [d["resolved"] for d in mock_train_data]
+@pytest.fixture
+def train_data():
+    return Dataset.from_dict({
+        "problem_statement": [f"Problem {i}" for i in range(600)],
+        "change_summary": [f"Solution {i}" for i in range(600)],
+        "resolved": [True] * 600,
     })
-    
-    # Mock load_dataset to return our test data
-    with patch('swe_scaffold.dataset.load_dataset') as mock_load:
-        mock_load.return_value = DatasetDict({"train": mock_train_dataset})
-        
-        # Test with limit=None (default)
-        split = load_conversation_dataset("mock-dataset", limit=None)
-        
-        # With 90/10 split, we expect ~90 dev and ~10 test
-        # Total should match the original dataset size
-        total_loaded = len(split.dev) + len(split.test)
-        assert total_loaded == 100, f"Expected 100 total examples, got {total_loaded}"
-        
-        # Verify dev is approximately 90% and test is approximately 10%
-        assert len(split.dev) == 90, f"Expected 90 dev examples, got {len(split.dev)}"
-        assert len(split.test) == 10, f"Expected 10 test examples, got {len(split.test)}"
 
 
-def test_load_conversation_dataset_with_zero_limit():
-    """Test that when limit is 0, the full dataset is loaded."""
-    # Create a mock dataset with a known size
-    mock_train_data = []
-    for i in range(50):
-        mock_train_data.append({
-            "problem_statement": f"Problem {i}",
-            "change_summary": f"Solution {i}",
-            "resolved": True
-        })
-    
-    mock_train_dataset = Dataset.from_dict({
-        "problem_statement": [d["problem_statement"] for d in mock_train_data],
-        "change_summary": [d["change_summary"] for d in mock_train_data],
-        "resolved": [d["resolved"] for d in mock_train_data]
-    })
-    
-    # Mock load_dataset to return our test data
-    with patch('swe_scaffold.dataset.load_dataset') as mock_load:
-        mock_load.return_value = DatasetDict({"train": mock_train_dataset})
-        
-        # Test with limit=0 (should load full dataset)
-        split = load_conversation_dataset("mock-dataset", limit=0)
-        
-        # Total should match the original dataset size
-        total_loaded = len(split.dev) + len(split.test)
-        assert total_loaded == 50, f"Expected 50 total examples, got {total_loaded}"
+@pytest.mark.parametrize("limit", [None, 0, -1])
+@pytest.mark.parametrize("holdout_fraction,expected", [(None, (540, 60)), (0.0, (600, 0))])
+def test_full_dataset_limits(train_data, limit, holdout_fraction, expected):
+    with patch("swe_scaffold.dataset.load_dataset", return_value=train_data) as load:
+        split = load_conversation_dataset(
+            "mock-dataset", limit=limit, holdout_fraction=holdout_fraction
+        )
+    load.assert_called_once_with("mock-dataset", split="train")
+    assert (len(split.dev), len(split.test)) == expected
+    assert set(split.dev["prompt"]) | set(split.test["prompt"]) == set(train_data["problem_statement"])
 
 
-def test_load_conversation_dataset_with_positive_limit():
-    """Test that when limit is positive, it caps the dev portion accordingly."""
-    # Create a mock dataset with a known size
-    mock_train_data = []
-    for i in range(100):
-        mock_train_data.append({
-            "problem_statement": f"Problem {i}",
-            "change_summary": f"Solution {i}",
-            "resolved": True
-        })
-    
-    mock_train_dataset = Dataset.from_dict({
-        "problem_statement": [d["problem_statement"] for d in mock_train_data],
-        "change_summary": [d["change_summary"] for d in mock_train_data],
-        "resolved": [d["resolved"] for d in mock_train_data]
-    })
-    
-    # Mock load_dataset to return our test data
-    with patch('swe_scaffold.dataset.load_dataset') as mock_load:
-        mock_load.return_value = DatasetDict({"train": mock_train_dataset})
-        
-        # Test with limit=20 (should cap dev to 20 and test to 2)
-        split = load_conversation_dataset("mock-dataset", limit=20)
-        
-        # Dev should be capped at the limit
-        assert len(split.dev) == 20, f"Expected 20 dev examples, got {len(split.dev)}"
-        # Test should be limit // 10 = 2
-        assert len(split.test) == 2, f"Expected 2 test examples, got {len(split.test)}"
+@pytest.mark.parametrize("holdout_fraction,expected", [(None, (20, 2)), (0.0, (20, 0))])
+def test_positive_limit_preserves_caps(train_data, holdout_fraction, expected):
+    with patch("swe_scaffold.dataset.load_dataset", return_value=train_data):
+        split = load_conversation_dataset(
+            "mock-dataset", limit=20, holdout_fraction=holdout_fraction
+        )
+    assert (len(split.dev), len(split.test)) == expected
 
 
-if __name__ == "__main__":
-    pytest.main([__file__, "-v"])
+def test_config_defaults_load_all_examples():
+    assert DatasetConfig().max_examples is None
+    config_path = Path(__file__).parents[1] / "configs" / "speedrun.json"
+    config = SpeedrunConfig.from_dict(json.loads(config_path.read_text()))
+    assert config.dataset.max_examples is None
+
+
+@pytest.mark.parametrize("arguments,expected", [([], None), (["--limit", "0"], 0), (["--limit", "-1"], -1), (["--limit", "20"], 20)])
+def test_cli_limit_arguments(monkeypatch, arguments, expected):
+    monkeypatch.setattr(sys, "argv", ["build_speedrun_dataset.py", *arguments])
+    assert build_speedrun_dataset.parse_args().limit == expected
+
+
+@pytest.mark.parametrize("arguments,expected", [([], (540, 60)), (["--limit", "20"], (20, 2)), (["--no-holdout"], (600, 0))])
+def test_build_script_keeps_all_examples_by_default(tmp_path, monkeypatch, train_data, arguments, expected):
+    output = tmp_path / "data.jsonl"
+    monkeypatch.setattr(sys, "argv", ["build_speedrun_dataset.py", "--output", str(output), "--emit-test", *arguments])
+    with patch("swe_scaffold.dataset.load_dataset", return_value=train_data):
+        build_speedrun_dataset.main()
+    dev = [json.loads(line) for line in output.read_text().splitlines()]
+    test = [json.loads(line) for line in output.with_suffix(".test.jsonl").read_text().splitlines()]
+    assert (len(dev), len(test)) == expected
+    assert all(record["response"] for record in dev + test)

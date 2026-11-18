@@ -52,9 +52,11 @@ class TrainingConfig:
 class DatasetConfig:
     """Configuration for dataset assembly and caching."""
 
-    source_dataset: str = "anchen-li/swe-bench-lite"
+    source_dataset: str = "SWE-bench/SWE-bench"
     local_cache: Path = Path("data/processed/swe-speedrun.jsonl")
     dev_split: float = 0.9
+    train_only: bool = True
+    holdout_fraction: Optional[float] = None
     text_fields: List[str] = field(
         default_factory=lambda: [
             "problem_statement",
