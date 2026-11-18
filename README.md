@@ -53,7 +53,7 @@ pip install -r requirements.txt
 2. **Prepare dataset**
 
 ```bash
-python scripts/build_speedrun_dataset.py --dataset SWE-bench/SWE-bench --train-only --limit 1000 --output data/processed/swe-speedrun.jsonl
+python scripts/build_speedrun_dataset.py --dataset SWE-bench/SWE-bench --train-only --output data/processed/swe-speedrun.jsonl
 python scripts/summarize_dataset.py data/processed/swe-speedrun.jsonl
 ```
 

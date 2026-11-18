@@ -63,7 +63,7 @@ class DatasetConfig:
             "change_summary",
         ]
     )
-    max_examples: Optional[int] = 500
+    max_examples: Optional[int] = None
 
 
 @dataclass(slots=True)

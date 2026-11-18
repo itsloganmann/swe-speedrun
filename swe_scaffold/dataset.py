@@ -108,7 +108,7 @@ def load_conversation_dataset(
     split:
         Fraction of data to use for training (dev) split. Default: 0.9.
     limit:
-        Optional limit on number of examples to load from dev split.
+        Optional dev example limit. None, zero and negative values load all examples.
     train_only:
         If True, load only the "train" split from HF dataset. Default: True.
     holdout_fraction:
@@ -154,11 +154,13 @@ def load_conversation_dataset(
             raise TypeError("Only map-style datasets are supported for speedrun training")
 
     # Optional limits
-    if limit is not None:
+    if limit is not None and limit > 0:
         dev_source = dev_source.select(range(min(limit, len(dev_source))))
         if holdout_fraction is None or holdout_fraction > 0:
             test_cap = max(limit // 10, 1)
             test_source = test_source.select(range(min(test_cap, len(test_source))))
+    else:
+        print(f"Loading full dataset: {len(dev_source)} dev examples, {len(test_source)} test examples (total: {len(dev_source) + len(test_source)})")
 
     # Project fields to prompt, response, and label
     def _project(src: Dataset) -> Dataset:

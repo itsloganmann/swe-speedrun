@@ -16,7 +16,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--config", type=Path, default=Path("configs/scaffold_readonly.yaml"), help="Path to config file (YAML or JSON)")
     parser.add_argument("--output", type=Path, default=Path("data/processed/swe-speedrun.jsonl"), help="Destination JSONL path (dev split)")
     parser.add_argument("--dataset", type=str, default="SWE-bench/SWE-bench", help="Hugging Face dataset identifier")
-    parser.add_argument("--limit", type=int, default=500, help="Optional limit on number of dev examples")
+    parser.add_argument("--limit", type=int, default=None, help="Optional limit on dev examples. Omit or use 0 or a negative value to load all examples.")
     parser.add_argument("--train-only", action="store_true", default=True, help="Load only the train split from HF dataset (default: True)")
     parser.add_argument("--no-train-only", dest="train_only", action="store_false", help="Disable train-only mode (load all splits)")
     parser.add_argument("--no-holdout", action="store_true", help="Skip creating a test split (all data goes to dev)")
