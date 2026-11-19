@@ -64,6 +64,8 @@ class DatasetConfig:
         ]
     )
     max_examples: Optional[int] = 500
+    min_patch_chars: Optional[int] = None
+    include_empty: bool = False
 
 
 @dataclass(slots=True)

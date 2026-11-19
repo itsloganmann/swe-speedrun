@@ -1,4 +1,5 @@
 """Dataset helpers for SWE speedrun fine-tuning."""
+
 from __future__ import annotations
 
 import json
@@ -15,6 +16,17 @@ from .labels import SpeedrunLabel, batch_label_conversations
 class DatasetSplit:
     dev: Dataset
     test: Dataset
+
+
+@dataclass(slots=True)
+class ProjectionResult(DatasetSplit):
+    """Result of dataset projection including skipped examples."""
+
+    skipped: List[dict]
+
+    @property
+    def split(self) -> DatasetSplit:
+        return self
 
 
 class SpeedrunDatasetBuilder:
@@ -36,8 +48,12 @@ class SpeedrunDatasetBuilder:
             if "dev" in dataset_dict and "test" in dataset_dict:
                 return DatasetSplit(dev=dataset_dict["dev"], test=dataset_dict["test"])
             # Fallback: derive dev and test from a single split
-            base_key = "train" if "train" in dataset_dict else sorted(dataset_dict.keys())[0]
-            derived = dataset_dict[base_key].train_test_split(test_size=0.1, seed=self.seed)
+            base_key = (
+                "train" if "train" in dataset_dict else sorted(dataset_dict.keys())[0]
+            )
+            derived = dataset_dict[base_key].train_test_split(
+                test_size=0.1, seed=self.seed
+            )
             return DatasetSplit(dev=derived["train"], test=derived["test"])
 
         # Otherwise treat it as a JSONL file - read line by line to handle large files
@@ -57,7 +73,9 @@ class SpeedrunDatasetBuilder:
                 records.append(obj)
 
         if not records:
-            raise ValueError(f"No records loaded from {path}; is the file empty or non JSONL?")
+            raise ValueError(
+                f"No records loaded from {path}; is the file empty or non JSONL?"
+            )
 
         labels = batch_label_conversations(records)
         prompts = [record.get("prompt", "") for record in records]
@@ -98,7 +116,10 @@ def load_conversation_dataset(
     limit: Optional[int] = None,
     train_only: bool = True,
     holdout_fraction: Optional[float] = None,
-) -> DatasetSplit:
+    *,
+    min_patch_chars: Optional[int] = None,
+    include_empty: bool = False,
+) -> ProjectionResult:
     """Load SWE-bench and project into prompt and response pairs using dev and test splits.
 
     Parameters
@@ -114,6 +135,10 @@ def load_conversation_dataset(
     holdout_fraction:
         Optional fraction for test split when train_only is True.
         If None, uses (1 - split). If 0.0, no test split is created.
+    min_patch_chars:
+        Minimum stripped response length for patch and test_patch sources.
+    include_empty:
+        Retain examples with no response after field fallback.
     """
 
     # Determine how to load the dataset
@@ -122,11 +147,11 @@ def load_conversation_dataset(
         dataset_any = load_dataset(dataset_name, split="train")
         if not isinstance(dataset_any, Dataset):
             raise TypeError("Expected Dataset when using train_only mode")
-        
+
         # Determine if we should create a holdout
         if holdout_fraction is None:
             holdout_fraction = 1 - split
-        
+
         if holdout_fraction > 0:
             derived = dataset_any.train_test_split(test_size=holdout_fraction, seed=42)
             dev_source, test_source = derived["train"], derived["test"]
@@ -144,14 +169,20 @@ def load_conversation_dataset(
                 test_source = dataset_any["test"]
             else:
                 # Fallback: derive dev and test from a single split
-                base_key = "train" if "train" in dataset_any else sorted(dataset_any.keys())[0]
-                derived = dataset_any[base_key].train_test_split(test_size=1 - split, seed=42)
+                base_key = (
+                    "train" if "train" in dataset_any else sorted(dataset_any.keys())[0]
+                )
+                derived = dataset_any[base_key].train_test_split(
+                    test_size=1 - split, seed=42
+                )
                 dev_source, test_source = derived["train"], derived["test"]
         elif isinstance(dataset_any, Dataset):
             derived = dataset_any.train_test_split(test_size=1 - split, seed=42)
             dev_source, test_source = derived["train"], derived["test"]
         else:
-            raise TypeError("Only map-style datasets are supported for speedrun training")
+            raise TypeError(
+                "Only map-style datasets are supported for speedrun training"
+            )
 
     # Optional limits
     if limit is not None:
@@ -160,51 +191,107 @@ def load_conversation_dataset(
             test_cap = max(limit // 10, 1)
             test_source = test_source.select(range(min(test_cap, len(test_source))))
 
-    # Project fields to prompt, response, and label
-    def _project(src: Dataset) -> Dataset:
+    # Project fields to prompt/response/label
+    def _project(src: Dataset) -> tuple[Dataset, List[dict]]:
         prompts: List[str] = []
         responses: List[str] = []
         labels: List[SpeedrunLabel] = []
+        skipped: List[dict] = []
+
         for row in src:
             row_dict = dict(row)
+            instance_id = row_dict.get("instance_id", "unknown")
             prompt = row_dict.get("problem_statement", "") or ""
-            
-            # Fallback response selection: change_summary -> patch -> test_patch -> ""
-            response = (
-                row_dict.get("change_summary", "")
-                or row_dict.get("patch", "")
-                or row_dict.get("test_patch", "")
-                or ""
-            )
-            
-            # Label heuristic: If resolved field exists, use it; otherwise check patch
-            if "resolved" in row_dict:
-                resolved = row_dict.get("resolved", False)
-                label = SpeedrunLabel.SUCCESS if resolved else SpeedrunLabel.FAILURE
+
+            # Response fallback: change_summary → patch → test_patch
+            change_summary = row_dict.get("change_summary", "") or ""
+            patch = row_dict.get("patch", "") or ""
+            test_patch = row_dict.get("test_patch", "") or ""
+
+            # Track which fields are available
+            has_change_summary = bool(change_summary.strip())
+            has_patch = bool(patch.strip())
+            has_test_patch = bool(test_patch.strip())
+
+            # Select response with fallback
+            response = ""
+            response_source = None
+            if has_change_summary:
+                response = change_summary
+                response_source = "change_summary"
+            elif has_patch:
+                response = patch
+                response_source = "patch"
+            elif has_test_patch:
+                response = test_patch
+                response_source = "test_patch"
+
+            response_length = len(response.strip())
+
+            # Check if we should skip this example
+            skip_reason = None
+
+            # Check for empty response
+            if response_length == 0 and not include_empty:
+                skip_reason = "empty_response"
+
+            # Check patch length threshold (only for patch/test_patch sources)
+            if (
+                skip_reason is None
+                and min_patch_chars is not None
+                and response_source in ("patch", "test_patch")
+                and response_length < min_patch_chars
+            ):
+                skip_reason = "short_patch"
+
+            # Record skip or add to dataset
+            if skip_reason:
+                skipped.append(
+                    {
+                        "instance_id": instance_id,
+                        "reason": skip_reason,
+                        "source_fields": {
+                            "has_change_summary": has_change_summary,
+                            "has_patch": has_patch,
+                            "has_test_patch": has_test_patch,
+                        },
+                        "patch_len": response_length,
+                    }
+                )
             else:
-                # If non-empty patch exists, label as SUCCESS
-                patch = row_dict.get("patch", "")
-                label = SpeedrunLabel.SUCCESS if patch else SpeedrunLabel.FAILURE
-            
-            prompts.append(prompt)
-            responses.append(response)
-            labels.append(label)
-        return Dataset.from_dict(
+                if "resolved" in row_dict:
+                    resolved = row_dict["resolved"]
+                else:
+                    resolved = bool(row_dict.get("patch", ""))
+                label = SpeedrunLabel.SUCCESS if resolved else SpeedrunLabel.FAILURE
+                prompts.append(prompt)
+                responses.append(response)
+                labels.append(label)
+
+        dataset = Dataset.from_dict(
             {
                 "prompt": prompts,
                 "response": responses,
                 "label": [label.value for label in labels],
             }
         )
+        return dataset, skipped
 
-    dev_dataset = _project(dev_source) if len(dev_source) > 0 else dev_source
-    test_dataset = _project(test_source) if len(test_source) > 0 else test_source
+    dev_dataset, dev_skipped = _project(dev_source)
+    test_dataset, test_skipped = _project(test_source)
 
-    return DatasetSplit(dev=dev_dataset, test=test_dataset)
+    all_skipped = dev_skipped + test_skipped
+
+    return ProjectionResult(
+        dev=dev_dataset,
+        test=test_dataset,
+        skipped=all_skipped,
+    )
 
 
 __all__ = [
     "DatasetSplit",
+    "ProjectionResult",
     "SpeedrunDatasetBuilder",
     "load_conversation_dataset",
 ]
