@@ -1,4 +1,5 @@
 """Configuration models for the SWE speedrun training pipeline."""
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -48,39 +49,58 @@ class TrainingConfig:
     lora: LoRAConfig = field(default_factory=LoRAConfig)
 
 
-@dataclass(slots=True)
+@dataclass(slots=True, init=False)
 class DatasetConfig:
     """Configuration for dataset assembly and caching."""
 
-    source_dataset: str = "SWE-bench/SWE-bench"
-    local_cache: Path = Path("data/processed/swe-speedrun.jsonl")
-    holdout_fraction: Optional[float] = None
-    train_only: bool = True
-    include_empty: bool = False
-    min_patch_chars: Optional[int] = None
-    max_examples: Optional[int] = None
-    skipped_report_path: Optional[Path] = None
-    text_fields: List[str] = field(
-        default_factory=lambda: [
-            "problem_statement",
-            "change_summary",
-        ]
-    )
-    
-    # Backward compatibility
+    source_dataset: str
+    local_cache: Path
+    train_only: bool
+    holdout_fraction: Optional[float]
+    text_fields: List[str]
+    max_examples: Optional[int]
+    min_patch_chars: Optional[int]
+    include_empty: bool
+    skipped_report_path: Optional[Path]
+
+    def __init__(
+        self,
+        source_dataset: str = "SWE-bench/SWE-bench",
+        local_cache: Path = Path("data/processed/swe-speedrun.jsonl"),
+        dev_split: Optional[float] = None,
+        train_only: bool = True,
+        holdout_fraction: Optional[float] = None,
+        text_fields: Optional[List[str]] = None,
+        max_examples: Optional[int] = None,
+        min_patch_chars: Optional[int] = None,
+        include_empty: bool = False,
+        skipped_report_path: Optional[Path] = None,
+    ) -> None:
+        self.source_dataset = source_dataset
+        self.local_cache = local_cache
+        self.train_only = train_only
+        self.holdout_fraction = holdout_fraction
+        if dev_split is not None and holdout_fraction is None:
+            self.dev_split = dev_split
+        self.text_fields = (
+            ["problem_statement", "change_summary"]
+            if text_fields is None
+            else list(text_fields)
+        )
+        self.max_examples = max_examples
+        self.min_patch_chars = min_patch_chars
+        self.include_empty = include_empty
+        self.skipped_report_path = skipped_report_path
+
     @property
     def dev_split(self) -> float:
-        """Legacy property for backward compatibility. Maps to (1 - holdout_fraction)."""
-        if self.holdout_fraction is None:
-            return 1.0 if self.train_only else 0.9
-        return 1.0 - self.holdout_fraction
-    
+        return 1.0 - (self.holdout_fraction or 0.0)
+
     @dev_split.setter
     def dev_split(self, value: float) -> None:
-        """Legacy setter for backward compatibility. Maps to holdout_fraction."""
+        if not 0 < value <= 1:
+            raise ValueError("dev_split must be greater than zero and at most one")
         self.holdout_fraction = 1.0 - value
-        if self.holdout_fraction == 0.0:
-            self.train_only = True
 
 
 @dataclass(slots=True)
@@ -94,8 +114,20 @@ class SpeedrunConfig:
     def from_dict(cls, payload: dict) -> "SpeedrunConfig":
         """Instantiate a configuration object from a nested dictionary."""
 
-        dataset = DatasetConfig(**payload.get("dataset", {}))
-        training_payload = payload.get("training", {})
+        dataset_payload = dict(payload.get("dataset", {}))
+        if "dev_split" in dataset_payload:
+            legacy_split = dataset_payload.pop("dev_split")
+            if "holdout_fraction" not in dataset_payload:
+                if not 0 < legacy_split <= 1:
+                    raise ValueError(
+                        "dev_split must be greater than zero and at most one"
+                    )
+                dataset_payload["holdout_fraction"] = 1.0 - legacy_split
+        for name in ("local_cache", "skipped_report_path"):
+            if dataset_payload.get(name) is not None:
+                dataset_payload[name] = Path(dataset_payload[name])
+        dataset = DatasetConfig(**dataset_payload)
+        training_payload = dict(payload.get("training", {}))
         lora_payload = training_payload.pop("lora", {})
         training = TrainingConfig(**training_payload, lora=LoRAConfig(**lora_payload))
         return cls(dataset=dataset, training=training)
