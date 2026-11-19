@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import warnings
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import List, Optional
@@ -82,6 +83,11 @@ class DatasetConfig:
         self.holdout_fraction = holdout_fraction
         if dev_split is not None and holdout_fraction is None:
             self.dev_split = dev_split
+            warnings.warn(
+                "dev_split is deprecated; the default is now no holdout. Use holdout_fraction.",
+                FutureWarning,
+                stacklevel=2,
+            )
         self.text_fields = (
             ["problem_statement", "change_summary"]
             if text_fields is None
@@ -123,6 +129,11 @@ class SpeedrunConfig:
                         "dev_split must be greater than zero and at most one"
                     )
                 dataset_payload["holdout_fraction"] = 1.0 - legacy_split
+                warnings.warn(
+                    "dev_split is deprecated; the default is now no holdout. Use holdout_fraction.",
+                    FutureWarning,
+                    stacklevel=2,
+                )
         for name in ("local_cache", "skipped_report_path"):
             if dataset_payload.get(name) is not None:
                 dataset_payload[name] = Path(dataset_payload[name])

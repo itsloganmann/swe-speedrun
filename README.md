@@ -15,9 +15,11 @@ This scaffold uses **dev** for training examples and **test** for an optional in
 
 The default configuration requests `train` from [SWE-bench/SWE-bench](https://huggingface.co/datasets/SWE-bench/SWE-bench), with no example cap and no holdout. It never folds the official test split into training. Set a positive limit for a smaller run, or a holdout fraction between zero and one for evaluation.
 
+`None` and zero disable the internal holdout. Out-of-range or nonfinite holdout fractions emit a warning and use no holdout.
+
 **Upstream availability, checked November 19, 2026:** That dataset currently exposes only `dev` and `test`, so its default build fails with `Unknown split "train"`. The migration remains pending a compatible training source. Select a verified training corpus with `--dataset`; the builder does not silently substitute evaluation data or a different corpus.
 
-Legacy JSON configurations with `dev_split` still map that training fraction to an internal holdout. An explicit `holdout_fraction` takes precedence. `train_only` controls which upstream split is loaded; it does not disable an explicit holdout. In legacy `train_only=false` mode, an existing dev/test pair is preserved unless a split override is supplied.
+Legacy JSON configurations with `dev_split` still map that training fraction to an internal holdout. Legacy `split` and converted `dev_split` inputs emit a `FutureWarning` explaining the no-holdout default. An explicit `holdout_fraction` takes precedence. `train_only` controls which upstream split is loaded; it does not disable an explicit holdout. In legacy `train_only=false` mode, an existing dev/test pair is preserved unless a split override is supplied.
 
 ## Dataset Filtering and Auditing
 

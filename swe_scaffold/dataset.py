@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import math
+import warnings
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, List, Optional
@@ -162,7 +163,12 @@ def load_conversation_dataset(
         else (1 - split if split is not None else 0.0)
     )
     if not math.isfinite(fraction) or not 0 <= fraction < 1:
-        raise ValueError("holdout_fraction must be finite and between zero and one")
+        warnings.warn(
+            "holdout_fraction must be finite and between zero and one; using no holdout.",
+            UserWarning,
+            stacklevel=2,
+        )
+        fraction = 0.0
     if limit is not None and not isinstance(limit, int):
         raise ValueError("limit must be an integer or None")
     if min_patch_chars is not None and (
@@ -171,6 +177,13 @@ def load_conversation_dataset(
         raise ValueError("min_patch_chars must be a nonnegative integer or None")
     if not isinstance(train_only, bool) or not isinstance(include_empty, bool):
         raise ValueError("train_only and include_empty must be booleans")
+
+    if split is not None:
+        warnings.warn(
+            "split is deprecated; the default is now no holdout. Use holdout_fraction.",
+            FutureWarning,
+            stacklevel=2,
+        )
 
     dataset_any = (
         load_dataset(dataset_name, split="train")

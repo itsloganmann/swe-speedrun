@@ -1,5 +1,6 @@
 import copy
 import json
+import warnings
 from pathlib import Path
 from unittest.mock import patch
 
@@ -20,9 +21,9 @@ from swe_scaffold.dataset import (
 def training_source() -> Dataset:
     return Dataset.from_dict(
         {
-            "instance_id": [str(i) for i in range(600)],
-            "problem_statement": [f"problem {i}" for i in range(600)],
-            "change_summary": [f"answer {i}" for i in range(600)],
+            "instance_id": [str(i) for i in range(1201)],
+            "problem_statement": [f"problem {i}" for i in range(1201)],
+            "change_summary": [f"answer {i}" for i in range(1201)],
         }
     )
 
@@ -34,6 +35,41 @@ def test_legacy_config_maps_holdout_without_mutating_input() -> None:
     assert config.dataset.holdout_fraction == pytest.approx(0.2)
     assert config.training.lora.r == 4
     assert payload == original
+
+
+@pytest.mark.parametrize("route", ["constructor", "json", "loader"])
+def test_legacy_split_settings_warn_about_new_default(
+    route: str, training_source: Dataset
+) -> None:
+    with (
+        patch("swe_scaffold.dataset.load_dataset", return_value=training_source),
+        pytest.warns(FutureWarning, match="no holdout"),
+    ):
+        if route == "constructor":
+            config = DatasetConfig(dev_split=0.8)
+            assert config.holdout_fraction == pytest.approx(0.2)
+        elif route == "json":
+            config = SpeedrunConfig.from_dict({"dataset": {"dev_split": 0.8}}).dataset
+            assert config.holdout_fraction == pytest.approx(0.2)
+        else:
+            result = load_conversation_dataset("example", split=0.8)
+            assert len(result.test) > 0
+            assert result.total_kept == len(training_source)
+
+
+def test_current_split_settings_do_not_emit_migration_warning(
+    training_source: Dataset,
+) -> None:
+    with warnings.catch_warnings(record=True) as emitted:
+        warnings.simplefilter("always", FutureWarning)
+        assert DatasetConfig().holdout_fraction is None
+        config = SpeedrunConfig.from_dict({"dataset": {"holdout_fraction": 0.2}})
+        with patch("swe_scaffold.dataset.load_dataset", return_value=training_source):
+            result = load_conversation_dataset(
+                "example", holdout_fraction=config.dataset.holdout_fraction
+            )
+        assert len(result.test) > 0
+    assert not any(issubclass(item.category, FutureWarning) for item in emitted)
 
 
 @pytest.mark.parametrize("dev_rows,test_rows", [(1, 0), (0, 1), (0, 0)])
@@ -95,8 +131,8 @@ def test_unlimited_loader_defaults_keep_full_training_source(
     ) as load:
         result = load_conversation_dataset("example", limit=limit)
     load.assert_called_once_with("example", split="train")
-    assert (len(result.dev), len(result.test)) == (600, 0)
-    assert (result.total_kept, result.total_skipped) == (600, 0)
+    assert (len(result.dev), len(result.test)) == (1201, 0)
+    assert (result.total_kept, result.total_skipped) == (1201, 0)
 
 
 def test_explicit_holdout_retains_positive_dev_and_test_caps(
@@ -113,16 +149,17 @@ def test_legacy_positional_split_and_limit_still_work(training_source: Dataset) 
     assert (len(result.dev), len(result.test)) == (5, 1)
 
 
-@pytest.mark.parametrize("fraction", [-0.1, 1.0, float("nan")])
-def test_invalid_holdout_is_rejected_before_fetch(
+@pytest.mark.parametrize("fraction", [-0.1, 1.0, float("nan"), float("inf")])
+def test_invalid_holdout_warns_and_uses_no_holdout(
     training_source: Dataset, fraction: float
 ) -> None:
     with patch(
         "swe_scaffold.dataset.load_dataset", return_value=training_source
     ) as load:
-        with pytest.raises(ValueError):
-            load_conversation_dataset("example", holdout_fraction=fraction)
-    load.assert_not_called()
+        with pytest.warns(UserWarning, match="using no holdout"):
+            result = load_conversation_dataset("example", holdout_fraction=fraction)
+    load.assert_called_once_with("example", split="train")
+    assert (len(result.dev), len(result.test)) == (len(training_source), 0)
 
 
 @pytest.mark.parametrize("extension", ["json", "yaml"])
@@ -241,7 +278,7 @@ def test_cli_without_limit_keeps_all_rows_and_no_holdout(
     monkeypatch.setattr("sys.argv", ["build", "--output", str(output), "--emit-test"])
     with patch("swe_scaffold.dataset.load_dataset", return_value=training_source):
         build_speedrun_dataset.main()
-    assert len(output.read_text().splitlines()) == 600
+    assert len(output.read_text().splitlines()) == 1201
     assert output.with_suffix(".test.jsonl").read_text() == ""
 
 
