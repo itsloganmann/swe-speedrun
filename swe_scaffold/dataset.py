@@ -11,6 +11,7 @@ from typing import Callable, List, Optional
 
 from datasets import Dataset, DatasetDict, load_dataset
 
+from .config import DEFAULT_SOURCE_DATASET, DEFAULT_SOURCE_REVISION
 from .labels import SpeedrunLabel, batch_label_conversations
 
 
@@ -133,6 +134,7 @@ def load_conversation_dataset(
     *,
     min_patch_chars: Optional[int] = None,
     include_empty: bool = False,
+    revision: str | None = None,
 ) -> ProjectionResult:
     """Load SWE-bench and project into prompt and response pairs using dev and test splits.
 
@@ -153,6 +155,9 @@ def load_conversation_dataset(
         Minimum stripped response length for patch and test_patch sources.
     include_empty:
         Retain examples with no response after field fallback.
+    revision:
+        Optional Hugging Face revision. The default SWE-bench source uses a pinned
+        revision that still contains train; other sources use their own default.
     """
 
     if split is not None and (not math.isfinite(split) or not 0 < split <= 1):
@@ -185,11 +190,23 @@ def load_conversation_dataset(
             stacklevel=2,
         )
 
-    dataset_any = (
-        load_dataset(dataset_name, split="train")
-        if train_only
-        else load_dataset(dataset_name)
-    )
+    if revision is not None and (not isinstance(revision, str) or not revision.strip()):
+        raise ValueError("revision must be a nonempty string or None")
+    source_revision = revision
+    if source_revision is None and dataset_name == DEFAULT_SOURCE_DATASET:
+        source_revision = DEFAULT_SOURCE_REVISION
+    if source_revision is None:
+        dataset_any = (
+            load_dataset(dataset_name, split="train")
+            if train_only
+            else load_dataset(dataset_name)
+        )
+    else:
+        dataset_any = (
+            load_dataset(dataset_name, split="train", revision=source_revision)
+            if train_only
+            else load_dataset(dataset_name, revision=source_revision)
+        )
     if (
         isinstance(dataset_any, DatasetDict)
         and not train_only

@@ -7,6 +7,9 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import List, Optional
 
+DEFAULT_SOURCE_DATASET = "SWE-bench/SWE-bench"
+DEFAULT_SOURCE_REVISION = "ac1995e464b07cbd69702e8490a07f6d557b69b5"
+
 
 @dataclass(slots=True)
 class LoRAConfig:
@@ -63,10 +66,11 @@ class DatasetConfig:
     min_patch_chars: Optional[int]
     include_empty: bool
     skipped_report_path: Optional[Path]
+    source_revision: str | None
 
     def __init__(
         self,
-        source_dataset: str = "SWE-bench/SWE-bench",
+        source_dataset: str = DEFAULT_SOURCE_DATASET,
         local_cache: Path = Path("data/processed/swe-speedrun.jsonl"),
         dev_split: Optional[float] = None,
         train_only: bool = True,
@@ -76,8 +80,10 @@ class DatasetConfig:
         min_patch_chars: Optional[int] = None,
         include_empty: bool = False,
         skipped_report_path: Optional[Path] = None,
+        source_revision: str | None = None,
     ) -> None:
         self.source_dataset = source_dataset
+        self.source_revision = source_revision
         self.local_cache = local_cache
         self.train_only = train_only
         self.holdout_fraction = holdout_fraction

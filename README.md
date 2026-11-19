@@ -17,7 +17,7 @@ The default configuration requests `train` from [SWE-bench/SWE-bench](https://hu
 
 `None` and zero disable the internal holdout. Out-of-range or nonfinite holdout fractions emit a warning and use no holdout.
 
-**Upstream availability, checked November 19, 2026:** That dataset currently exposes only `dev` and `test`, so its default build fails with `Unknown split "train"`. The migration remains pending a compatible training source. Select a verified training corpus with `--dataset`; the builder does not silently substitute evaluation data or a different corpus.
+The default source is pinned to [revision `ac1995e`](https://huggingface.co/datasets/SWE-bench/SWE-bench/tree/ac1995e464b07cbd69702e8490a07f6d557b69b5), which contains 19,008 training rows. Upstream `main` removed `train` in August 2026. The pin keeps the same official corpus and its original split; it does not substitute evaluation rows. Override it with `--revision` or `dataset.source_revision` when selecting another verified revision. Custom datasets use their own default revision unless one is specified.
 
 Legacy JSON configurations with `dev_split` still map that training fraction to an internal holdout. Legacy `split` and converted `dev_split` inputs emit a `FutureWarning` explaining the no-holdout default. An explicit `holdout_fraction` takes precedence. `train_only` controls which upstream split is loaded; it does not disable an explicit holdout. In legacy `train_only=false` mode, an existing dev/test pair is preserved unless a split override is supplied.
 
@@ -149,6 +149,7 @@ pytest tests/ -v
 Edit `configs/speedrun.json` to customize training parameters. Key settings include:
 
 - `dataset.source_dataset`: Hugging Face dataset identifier (default: "SWE-bench/SWE-bench")
+- `dataset.source_revision`: Optional HF revision; null uses the pinned revision above for the default source and the upstream default for custom sources
 - `dataset.train_only`: Load only the train split from HF dataset (default: true)
 - `dataset.holdout_fraction`: Internal holdout fraction (default: null, no holdout)
 
@@ -186,6 +187,7 @@ Success/failure labels are determined by:
 ### CLI Flags for build_speedrun_dataset.py
 
 - `--dataset`: HuggingFace dataset identifier (default: SWE-bench/SWE-bench)
+- `--revision`: Override the source revision; changing `--dataset` also clears a different source's configured revision unless `--revision` is supplied
 - `--config`: Dataset/training JSON or YAML file (default: built-in configuration)
 - `--limit`: Maximum dev examples; omit or use a nonpositive value for no cap by default
 - `--min-patch-chars`: Minimum character length for patch responses (filters short patches)

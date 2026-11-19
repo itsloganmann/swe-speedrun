@@ -48,6 +48,15 @@ def _apply_config(
             "dataset": (
                 args.dataset if args.dataset is not None else dataset.source_dataset
             ),
+            "revision": (
+                args.revision
+                if args.revision is not None
+                else (
+                    dataset.source_revision
+                    if args.dataset is None or args.dataset == dataset.source_dataset
+                    else None
+                )
+            ),
             "output": Path(output),
             "limit": args.limit if args.limit is not None else dataset.max_examples,
             "train_only": (
@@ -99,6 +108,12 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--dataset", type=str, default=None, help="Hugging Face dataset identifier"
+    )
+    parser.add_argument(
+        "--revision",
+        type=str,
+        default=None,
+        help="HF revision (default SWE-bench source is pinned to retain train)",
     )
     parser.add_argument(
         "--limit",
@@ -197,6 +212,7 @@ def main() -> None:
     args = parse_args()
     result = load_conversation_dataset(
         args.dataset,
+        revision=args.revision,
         limit=args.limit,
         train_only=args.train_only,
         holdout_fraction=args.holdout_fraction,
