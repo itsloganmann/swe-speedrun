@@ -3,12 +3,15 @@
 from __future__ import annotations
 
 import json
+import math
+import warnings
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, List, Optional
 
 from datasets import Dataset, DatasetDict, load_dataset
 
+from .config import DEFAULT_SOURCE_DATASET, DEFAULT_SOURCE_REVISION
 from .labels import SpeedrunLabel, batch_label_conversations
 
 
@@ -27,6 +30,14 @@ class ProjectionResult(DatasetSplit):
     @property
     def split(self) -> DatasetSplit:
         return self
+
+    @property
+    def total_kept(self) -> int:
+        return len(self.dev) + len(self.test)
+
+    @property
+    def total_skipped(self) -> int:
+        return len(self.skipped)
 
 
 class SpeedrunDatasetBuilder:
@@ -98,7 +109,11 @@ class SpeedrunDatasetBuilder:
     def hydrate_cache(self, split: DatasetSplit) -> None:
         self.cache_path.parent.mkdir(parents=True, exist_ok=True)
         payload = DatasetDict({"dev": split.dev, "test": split.test})
-        payload.save_to_disk(str(self.cache_path))
+        # Empty splits need an Arrow shard so load_from_disk can reopen them.
+        empty_shards = {
+            str(key): 1 for key, dataset in payload.items() if len(dataset) == 0
+        }
+        payload.save_to_disk(str(self.cache_path), num_shards=empty_shards)
 
     def load_or_build(self, builder: Callable[[], DatasetSplit]) -> DatasetSplit:
         if self.cache_path.exists():
@@ -112,13 +127,14 @@ class SpeedrunDatasetBuilder:
 
 def load_conversation_dataset(
     dataset_name: str,
-    split: float = 0.9,
+    split: Optional[float] = None,
     limit: Optional[int] = None,
     train_only: bool = True,
     holdout_fraction: Optional[float] = None,
     *,
     min_patch_chars: Optional[int] = None,
     include_empty: bool = False,
+    revision: str | None = None,
 ) -> ProjectionResult:
     """Load SWE-bench and project into prompt and response pairs using dev and test splits.
 
@@ -127,67 +143,105 @@ def load_conversation_dataset(
     dataset_name:
         Hugging Face dataset identifier (for example "SWE-bench/SWE-bench").
     split:
-        Fraction of data to use for training (dev) split. Default: 0.9.
+        Optional legacy training fraction. When provided, derives a holdout unless explicitly overridden.
     limit:
-        Optional limit on number of examples to load from dev split.
+        Optional positive cap on dev examples. None and nonpositive values are unlimited.
     train_only:
         If True, load only the "train" split from HF dataset. Default: True.
     holdout_fraction:
-        Optional fraction for test split when train_only is True.
-        If None, uses (1 - split). If 0.0, no test split is created.
+        Explicit holdout fraction. Defaults to no holdout when split is omitted.
+        An existing dev/test pair is preserved in legacy no-train-only mode without overrides.
     min_patch_chars:
         Minimum stripped response length for patch and test_patch sources.
     include_empty:
         Retain examples with no response after field fallback.
+    revision:
+        Optional Hugging Face revision. The default SWE-bench source uses a pinned
+        revision that still contains train; other sources use their own default.
     """
 
-    # Determine how to load the dataset
-    if train_only:
-        # Load only the train split
-        dataset_any = load_dataset(dataset_name, split="train")
-        if not isinstance(dataset_any, Dataset):
-            raise TypeError("Expected Dataset when using train_only mode")
+    if split is not None and (not math.isfinite(split) or not 0 < split <= 1):
+        raise ValueError("split must be greater than zero and at most one")
+    fraction = (
+        holdout_fraction
+        if holdout_fraction is not None
+        else (1 - split if split is not None else 0.0)
+    )
+    if not math.isfinite(fraction) or not 0 <= fraction < 1:
+        warnings.warn(
+            "holdout_fraction must be finite and between zero and one; using no holdout.",
+            UserWarning,
+            stacklevel=2,
+        )
+        fraction = 0.0
+    if limit is not None and not isinstance(limit, int):
+        raise ValueError("limit must be an integer or None")
+    if min_patch_chars is not None and (
+        not isinstance(min_patch_chars, int) or min_patch_chars < 0
+    ):
+        raise ValueError("min_patch_chars must be a nonnegative integer or None")
+    if not isinstance(train_only, bool) or not isinstance(include_empty, bool):
+        raise ValueError("train_only and include_empty must be booleans")
 
-        # Determine if we should create a holdout
-        if holdout_fraction is None:
-            holdout_fraction = 1 - split
+    if split is not None:
+        warnings.warn(
+            "split is deprecated; the default is now no holdout. Use holdout_fraction.",
+            FutureWarning,
+            stacklevel=2,
+        )
 
-        if holdout_fraction > 0:
-            derived = dataset_any.train_test_split(test_size=holdout_fraction, seed=42)
-            dev_source, test_source = derived["train"], derived["test"]
-        else:
-            # No holdout: all data goes to dev, empty test
-            dev_source = dataset_any
-            test_source = Dataset.from_dict({"prompt": [], "response": [], "label": []})
+    if revision is not None and (not isinstance(revision, str) or not revision.strip()):
+        raise ValueError("revision must be a nonempty string or None")
+    source_revision = revision
+    if source_revision is None and dataset_name == DEFAULT_SOURCE_DATASET:
+        source_revision = DEFAULT_SOURCE_REVISION
+    if source_revision is None:
+        dataset_any = (
+            load_dataset(dataset_name, split="train")
+            if train_only
+            else load_dataset(dataset_name)
+        )
     else:
-        # Legacy behavior: try to load from existing splits
-        dataset_any = load_dataset(dataset_name)
-        # Resolve to dev and test sources
+        dataset_any = (
+            load_dataset(dataset_name, split="train", revision=source_revision)
+            if train_only
+            else load_dataset(dataset_name, revision=source_revision)
+        )
+    if (
+        isinstance(dataset_any, DatasetDict)
+        and not train_only
+        and "dev" in dataset_any
+        and "test" in dataset_any
+        and split is None
+        and holdout_fraction is None
+    ):
+        dev_source, test_source = dataset_any["dev"], dataset_any["test"]
+    else:
         if isinstance(dataset_any, DatasetDict):
-            if "dev" in dataset_any and "test" in dataset_any:
-                dev_source = dataset_any["dev"]
-                test_source = dataset_any["test"]
+            if not dataset_any:
+                raise ValueError("Dataset contains no splits")
+            if "train" in dataset_any:
+                base_key = "train"
+            elif "dev" in dataset_any:
+                base_key = "dev"
             else:
-                # Fallback: derive dev and test from a single split
-                base_key = (
-                    "train" if "train" in dataset_any else sorted(dataset_any.keys())[0]
-                )
-                derived = dataset_any[base_key].train_test_split(
-                    test_size=1 - split, seed=42
-                )
-                dev_source, test_source = derived["train"], derived["test"]
-        elif isinstance(dataset_any, Dataset):
-            derived = dataset_any.train_test_split(test_size=1 - split, seed=42)
-            dev_source, test_source = derived["train"], derived["test"]
-        else:
+                raise ValueError("Dataset must contain a train or dev source split")
+            dataset_any = dataset_any[base_key]
+        if not isinstance(dataset_any, Dataset):
             raise TypeError(
                 "Only map-style datasets are supported for speedrun training"
             )
+        if fraction > 0:
+            derived = dataset_any.train_test_split(test_size=fraction, seed=42)
+            dev_source, test_source = derived["train"], derived["test"]
+        else:
+            dev_source = dataset_any
+            test_source = Dataset.from_dict({"prompt": [], "response": [], "label": []})
 
     # Optional limits
-    if limit is not None:
+    if limit is not None and limit > 0:
         dev_source = dev_source.select(range(min(limit, len(dev_source))))
-        if holdout_fraction is None or holdout_fraction > 0:
+        if len(test_source) > 0:
             test_cap = max(limit // 10, 1)
             test_source = test_source.select(range(min(test_cap, len(test_source))))
 

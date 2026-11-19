@@ -2,10 +2,12 @@
   "dataset": {
     "source_dataset": "SWE-bench/SWE-bench",
     "local_cache": "data/processed/swe-speedrun.jsonl",
-    "dev_split": 0.9,
     "train_only": true,
     "holdout_fraction": null,
-    "max_examples": 500
+    "max_examples": null,
+    "include_empty": false,
+    "min_patch_chars": null,
+    "skipped_report_path": null
   },
   "training": {
     "model_name": "Qwen/Qwen2.5-3B-Instruct",
