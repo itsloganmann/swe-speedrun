@@ -3,17 +3,19 @@
 This repository packages a reproducible workflow for exploring SWE-agent speedrun style datasets and fine-tuning [Qwen/Qwen2.5-3B-Instruct](https://huggingface.co/Qwen/Qwen2.5-3B-Instruct) with LoRA adapters. It contains:
 
 - A **read-only SWE-agent configuration** for guided repository walkthroughs
-- Dataset utilities that curate prompt/response pairs from SWE Bench–style corpora
+- Dataset utilities that curate prompt/response pairs from SWE-bench corpora
 - Training scripts that apply PEFT/LoRA adapters to Qwen
 - Evaluation helpers and lightweight CLI scripts for dataset QA
 
 ## Dataset Splits
 
-This scaffold uses **dev** and **test** splits to align with SWE-bench Lite naming conventions:
+This scaffold uses **dev** and **test** splits to align with standard machine learning naming conventions:
 - **dev**: Training split (default 90% of data)
 - **test**: Evaluation/holdout split (default 10% of data)
 
 The split ratio can be configured via the `dev_split` parameter in configuration files.
+
+By default, the scaffold loads only the **train** split from the full SWE-bench dataset (https://huggingface.co/datasets/SWE-bench/SWE-bench/viewer/default/train) and creates an internal holdout split. This can be configured using the `train_only` and `holdout_fraction` parameters.
 
 ## Dataset Filtering and Auditing
 
@@ -25,6 +27,8 @@ The dataset builder uses a fallback strategy when selecting responses from sourc
 2. **patch** (fallback if change_summary is empty)
 3. **test_patch** (fallback if both change_summary and patch are empty)
 
+Whitespace-only fields count as empty during selection. Stored responses retain their original text, including patch line endings.
+
 ### Minimum Patch Length Filter
 You can filter out examples where the selected response comes from `patch` or `test_patch` fields and is too short:
 - Configure via `min_patch_chars` in `DatasetConfig`
@@ -35,18 +39,21 @@ You can filter out examples where the selected response comes from `patch` or `t
 ### Empty Response Handling
 By default, examples with empty responses (after fallback) are filtered out:
 - Use `include_empty=True` in config or `--include-empty` CLI flag to retain them
-- Empty examples are labeled as FAILURE when included
+- Included empty examples follow the existing resolved-field and patch-presence label rules
 - Default behavior filters empty responses for cleaner training data
 
 ### Skipped Examples Report
 Track which examples were filtered and why:
 - Automatically generated at `data/processed/swe-speedrun.skipped.jsonl` (or custom path via `--skipped-report`)
 - Only created if examples were actually skipped (unless `--force-skipped-report` is used)
+- An existing report is cleared on a zero-skip rerun so it describes the current output.
 - Each line contains:
   - `instance_id`: identifier for the example
   - `reason`: either `empty_response` or `short_patch`
   - `source_fields`: which fields were available (has_change_summary, has_patch, has_test_patch)
-  - `patch_len`: character count of the selected response
+  - `patch_len`: stripped character count used by the length filter
+
+The skipped-report path must differ from the dataset output and any emitted test output.
 
 ## Project Layout
 
@@ -85,20 +92,28 @@ pip install -r requirements.txt
 
 ```bash
 # Basic usage
-python scripts/build_speedrun_dataset.py --dataset anchen-li/swe-bench-lite --limit 500 --output data/processed/swe-speedrun.jsonl
+python scripts/build_speedrun_dataset.py --dataset SWE-bench/SWE-bench --limit 500 --output data/processed/swe-speedrun.jsonl
 
 # With patch length filter (exclude patches shorter than 200 characters)
-python scripts/build_speedrun_dataset.py --dataset anchen-li/swe-bench-lite --limit 500 --min-patch-chars 200 --output data/processed/swe-speedrun.jsonl
+python scripts/build_speedrun_dataset.py --dataset SWE-bench/SWE-bench --limit 500 --min-patch-chars 200 --output data/processed/swe-speedrun.jsonl
 
 # Include empty responses (retain examples with no response content)
-python scripts/build_speedrun_dataset.py --dataset anchen-li/swe-bench-lite --limit 500 --include-empty --output data/processed/swe-speedrun.jsonl
+python scripts/build_speedrun_dataset.py --dataset SWE-bench/SWE-bench --limit 500 --include-empty --output data/processed/swe-speedrun.jsonl
 
 # Generate test split and skipped report
-python scripts/build_speedrun_dataset.py --dataset anchen-li/swe-bench-lite --limit 500 --emit-test --skipped-report data/processed/skipped.jsonl --output data/processed/swe-speedrun.jsonl
+python scripts/build_speedrun_dataset.py --dataset SWE-bench/SWE-bench --limit 500 --emit-test --skipped-report data/processed/skipped.jsonl --output data/processed/swe-speedrun.jsonl
 
 # Summarize the generated dataset
 python scripts/summarize_dataset.py data/processed/swe-speedrun.jsonl
 ```
+
+The build script now loads only the **train** split from SWE-bench by default and creates an internal 90/10 split. Responses are derived from the `patch` field (code diff) when no `change_summary` is available. 
+
+Additional flags:
+- `--train-only` (default): Load only the train split from HF dataset
+- `--no-train-only`: Disable train-only mode and load all available splits
+- `--no-holdout`: Skip creating a test split (all data goes to dev)
+- `--emit-test`: Write both dev and test splits to separate JSONL files
 
 3. **Fine-tune Qwen with LoRA**
 
@@ -122,6 +137,10 @@ pytest tests/ -v
 
 Edit `configs/speedrun.json` to customize training parameters. Key settings include:
 
+- `dataset.source_dataset`: Hugging Face dataset identifier (default: "SWE-bench/SWE-bench")
+- `dataset.train_only`: Load only the train split from HF dataset (default: true)
+- `dataset.holdout_fraction`: Fraction for test split when train_only is true (default: null, uses 1 - dev_split)
+
 ### Dataset Configuration
 - `dataset.dev_split`: Fraction of data used for training (default: 0.9)
 - `dataset.min_patch_chars`: Minimum character count for patch-based responses (default: None)
@@ -135,12 +154,26 @@ Edit `configs/speedrun.json` to customize training parameters. Key settings incl
 
 Training hyperparameters live in `swe_scaffold/config.py` and can be overridden through JSON passed to `train_qwen_speedrun.py`.
 
+### Response Field Selection
+
+The dataset builder uses a fallback hierarchy for response content:
+1. `change_summary` (if available)
+2. `patch` (code diff)
+3. `test_patch` (test changes)
+4. Empty string (if none available)
+
+### Label Heuristics
+
+Success/failure labels are determined by:
+- If `resolved` field exists: use its boolean value
+- Otherwise: SUCCESS if non-empty `patch` exists, else FAILURE
+
 ### CLI Flags for build_speedrun_dataset.py
 
 - `--dataset`: HuggingFace dataset identifier (default: SWE-bench/SWE-bench)
 - `--limit`: Maximum number of dev examples (default: 500)
 - `--min-patch-chars`: Minimum character length for patch responses (filters short patches)
-- `--include-empty`: Include examples with empty responses (labeled as FAILURE)
+- `--include-empty`: Include examples with empty responses
 - `--emit-test`: Also write test split to separate file
 - `--skipped-report`: Path for skipped examples report (default: data/processed/swe-speedrun.skipped.jsonl)
 - `--force-skipped-report`: Create skipped report even when no examples skipped

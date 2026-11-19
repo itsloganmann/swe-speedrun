@@ -1,21 +1,28 @@
 """Tests for dataset filtering and auditing features."""
-import json
-import tempfile
-from pathlib import Path
 
 import pytest
-from datasets import Dataset
+from datasets import Dataset, DatasetDict
 
-from swe_scaffold.dataset import load_conversation_dataset, ProjectionResult, DatasetSplit
+from swe_scaffold.dataset import ProjectionResult, load_conversation_dataset
 
 
 def create_mock_dataset_dict(records):
     """Helper to create a mock dataset from records."""
     from datasets import DatasetDict
-    dataset = Dataset.from_dict({
-        key: [r.get(key, "") for r in records] 
-        for key in ["instance_id", "problem_statement", "change_summary", "patch", "test_patch", "resolved"]
-    })
+
+    dataset = Dataset.from_dict(
+        {
+            key: [r.get(key, "") for r in records]
+            for key in [
+                "instance_id",
+                "problem_statement",
+                "change_summary",
+                "patch",
+                "test_patch",
+                "resolved",
+            ]
+        }
+    )
     return DatasetDict({"train": dataset})
 
 
@@ -48,25 +55,25 @@ def test_patch_length_filter_excludes_short_patches(monkeypatch):
             "resolved": False,
         },
     ]
-    
+
     mock_ds = create_mock_dataset_dict(records)
-    
-    def mock_load_dataset(name):
-        return mock_ds
-    
+
+    def mock_load_dataset(name: str, **kwargs: object) -> Dataset | DatasetDict:
+        return mock_ds["train"] if kwargs.get("split") == "train" else mock_ds
+
     monkeypatch.setattr("swe_scaffold.dataset.load_dataset", mock_load_dataset)
-    
+
     # Load with min_patch_chars=200
     result = load_conversation_dataset(
         "mock-dataset",
         min_patch_chars=200,
         include_empty=False,
     )
-    
+
     assert isinstance(result, ProjectionResult)
     # Only test-2 should pass (300 chars > 200)
     assert len(result.split.dev) + len(result.split.test) == 1
-    
+
     # Check skipped records
     short_skips = [s for s in result.skipped if s["reason"] == "short_patch"]
     assert len(short_skips) == 2
@@ -93,20 +100,20 @@ def test_patch_length_filter_only_applies_to_patches(monkeypatch):
             "resolved": False,
         },
     ]
-    
+
     mock_ds = create_mock_dataset_dict(records)
-    
-    def mock_load_dataset(name):
-        return mock_ds
-    
+
+    def mock_load_dataset(name: str, **kwargs: object) -> Dataset | DatasetDict:
+        return mock_ds["train"] if kwargs.get("split") == "train" else mock_ds
+
     monkeypatch.setattr("swe_scaffold.dataset.load_dataset", mock_load_dataset)
-    
+
     result = load_conversation_dataset(
         "mock-dataset",
         min_patch_chars=200,
         include_empty=False,
     )
-    
+
     # test-1 should pass (change_summary not subject to length filter)
     # test-2 should be skipped (patch too short)
     assert len(result.split.dev) + len(result.split.test) == 1
@@ -134,25 +141,25 @@ def test_include_empty_flag_retains_empty_responses(monkeypatch):
             "resolved": False,
         },
     ]
-    
+
     mock_ds = create_mock_dataset_dict(records)
-    
-    def mock_load_dataset(name):
-        return mock_ds
-    
+
+    def mock_load_dataset(name: str, **kwargs: object) -> Dataset | DatasetDict:
+        return mock_ds["train"] if kwargs.get("split") == "train" else mock_ds
+
     monkeypatch.setattr("swe_scaffold.dataset.load_dataset", mock_load_dataset)
-    
+
     # With include_empty=True
     result = load_conversation_dataset(
         "mock-dataset",
         include_empty=True,
     )
-    
+
     # Both examples should be included
     total = len(result.split.dev) + len(result.split.test)
     assert total == 2
     assert len(result.skipped) == 0
-    
+
     # Check that empty response is indeed empty
     dev_responses = result.split.dev["response"]
     test_responses = result.split.test["response"]
@@ -181,20 +188,20 @@ def test_include_empty_false_filters_empty_responses(monkeypatch):
             "resolved": False,
         },
     ]
-    
+
     mock_ds = create_mock_dataset_dict(records)
-    
-    def mock_load_dataset(name):
-        return mock_ds
-    
+
+    def mock_load_dataset(name: str, **kwargs: object) -> Dataset | DatasetDict:
+        return mock_ds["train"] if kwargs.get("split") == "train" else mock_ds
+
     monkeypatch.setattr("swe_scaffold.dataset.load_dataset", mock_load_dataset)
-    
+
     # With include_empty=False (default)
     result = load_conversation_dataset(
         "mock-dataset",
         include_empty=False,
     )
-    
+
     # Only test-2 should be included
     total = len(result.split.dev) + len(result.split.test)
     assert total == 1
@@ -231,21 +238,21 @@ def test_response_fallback_order(monkeypatch):
             "resolved": False,
         },
     ]
-    
+
     mock_ds = create_mock_dataset_dict(records)
-    
-    def mock_load_dataset(name):
-        return mock_ds
-    
+
+    def mock_load_dataset(name: str, **kwargs: object) -> Dataset | DatasetDict:
+        return mock_ds["train"] if kwargs.get("split") == "train" else mock_ds
+
     monkeypatch.setattr("swe_scaffold.dataset.load_dataset", mock_load_dataset)
-    
+
     result = load_conversation_dataset("mock-dataset", include_empty=False)
-    
+
     # Collect all responses
     dev_responses = list(result.split.dev["response"])
     test_responses = list(result.split.test["response"])
     all_responses = dev_responses + test_responses
-    
+
     # test-1 should use change_summary
     assert "summary" in all_responses
     # test-2 should use patch (not test_patch)
@@ -274,22 +281,22 @@ def test_skipped_report_structure(monkeypatch):
             "resolved": False,
         },
     ]
-    
+
     mock_ds = create_mock_dataset_dict(records)
-    
-    def mock_load_dataset(name):
-        return mock_ds
-    
+
+    def mock_load_dataset(name: str, **kwargs: object) -> Dataset | DatasetDict:
+        return mock_ds["train"] if kwargs.get("split") == "train" else mock_ds
+
     monkeypatch.setattr("swe_scaffold.dataset.load_dataset", mock_load_dataset)
-    
+
     result = load_conversation_dataset(
         "mock-dataset",
         min_patch_chars=100,
         include_empty=False,
     )
-    
+
     assert len(result.skipped) == 2
-    
+
     # Check structure of skipped records
     for skip_record in result.skipped:
         assert "instance_id" in skip_record
@@ -306,31 +313,43 @@ def test_skipped_report_structure(monkeypatch):
 def test_skipped_report_counts_by_reason(monkeypatch):
     """Test that we can count skipped examples by reason."""
     records = [
-        {"instance_id": f"empty-{i}", "problem_statement": f"P{i}", 
-         "change_summary": "", "patch": "", "test_patch": "", "resolved": False}
+        {
+            "instance_id": f"empty-{i}",
+            "problem_statement": f"P{i}",
+            "change_summary": "",
+            "patch": "",
+            "test_patch": "",
+            "resolved": False,
+        }
         for i in range(5)
     ] + [
-        {"instance_id": f"short-{i}", "problem_statement": f"P{i}", 
-         "change_summary": "", "patch": "x", "test_patch": "", "resolved": False}
+        {
+            "instance_id": f"short-{i}",
+            "problem_statement": f"P{i}",
+            "change_summary": "",
+            "patch": "x",
+            "test_patch": "",
+            "resolved": False,
+        }
         for i in range(3)
     ]
-    
+
     mock_ds = create_mock_dataset_dict(records)
-    
-    def mock_load_dataset(name):
-        return mock_ds
-    
+
+    def mock_load_dataset(name: str, **kwargs: object) -> Dataset | DatasetDict:
+        return mock_ds["train"] if kwargs.get("split") == "train" else mock_ds
+
     monkeypatch.setattr("swe_scaffold.dataset.load_dataset", mock_load_dataset)
-    
+
     result = load_conversation_dataset(
         "mock-dataset",
         min_patch_chars=10,
         include_empty=False,
     )
-    
+
     empty_count = sum(1 for s in result.skipped if s["reason"] == "empty_response")
     short_count = sum(1 for s in result.skipped if s["reason"] == "short_patch")
-    
+
     assert empty_count == 5
     assert short_count == 3
     assert len(result.skipped) == 8
